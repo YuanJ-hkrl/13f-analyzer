@@ -10,12 +10,29 @@
 13f-analyzer
 ```
 
-## 2. 配置防火墙
+## 2. 配置防火墙（本机跑 pipeline 必做）
 
 SQL Server → **Networking**：
 
 - 开启 **Allow Azure services and resources to access this server**（Static Web App / Functions 需要）
-- 若在本机跑 pipeline，添加您电脑的公网 IP
+- **添加您电脑的公网 IP**（本机跑 `sync_all.py` 必须，否则会 `Login timeout expired`）
+
+步骤：
+1. 浏览器搜索 `what is my ip`，记下公网 IP（例如 `203.0.113.45`）
+2. Azure Portal → SQL Server `hkrl8282` → **Networking**
+3. **Firewall rules** → Add your client IPv4 address（或手动添加 Start/End IP）
+4. **Save**
+
+若仍超时：检查公司 VPN/防火墙是否封锁 SQL 端口 1433，可换手机热点试一次。
+
+### 测试连接
+
+```bash
+cd pipeline
+python test_connection.py
+```
+
+成功会显示 `SUCCESS: connected`。
 
 ## 3. 执行建表脚本
 
@@ -54,12 +71,14 @@ mssql+pyodbc://YOUR_USER:YOUR_PASSWORD@hkrl8282.database.windows.net/13f-analyze
 
 写入位置：
 
-| 场景 | 配置文件 |
-|------|----------|
-| 本地 pipeline | 项目根目录 `.env` |
-| 本地 API | `api/local.settings.json` → `DATABASE_URL` |
-| 生产环境 | Azure Static Web App → Configuration → `DATABASE_URL` |
-| GitHub Actions 同步（若启用） | GitHub Secrets → `DATABASE_URL` |
+| 场景 | 配置文件 | 路径说明 |
+|------|----------|----------|
+| 本地 pipeline | 项目根目录 `.env` | `13f-analyzer/.env`（与 README 同级，**不是** `pipeline/.env`） |
+| 本地 API | `api/local.settings.json` | `DATABASE_URL` |
+| 生产环境 | Azure Static Web App → Configuration | `DATABASE_URL` |
+| GitHub Actions 同步（若启用） | GitHub Secrets | `DATABASE_URL` |
+
+密码含 `@`、`#`、`%` 等特殊字符时，需 URL 编码（`@` → `%40`）。
 
 ## 5. 验证连接
 
