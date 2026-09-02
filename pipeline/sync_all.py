@@ -29,12 +29,18 @@ def main():
     )
     args = parser.parse_args()
 
+    edgar_result = None
+
     if args.step in ("all", "edgar"):
         from edgar_13f import sync_all_funds
 
         logging.info("=== Syncing 13F filings from EDGAR ===")
-        result = sync_all_funds(max_filings=args.quarters)
-        logging.info("EDGAR sync result: %s", result)
+        edgar_result = sync_all_funds(max_filings=args.quarters)
+        logging.info("EDGAR sync result: %s", edgar_result)
+        if edgar_result.get("errors") or edgar_result.get("funds_with_zero_filings"):
+            logging.warning("EDGAR step completed with warnings/errors.")
+        else:
+            logging.info("EDGAR step completed successfully.")
 
     if args.step in ("all", "prices"):
         from price_data import sync_prices
@@ -50,7 +56,13 @@ def main():
         result = run_all_backtests()
         logging.info("Backtest result: %s", result)
 
-    logging.info("Pipeline complete.")
+    if args.step == "all":
+        if edgar_result and (edgar_result.get("errors") or edgar_result.get("funds_with_zero_filings")):
+            logging.warning("Pipeline completed with warnings/errors.")
+        else:
+            logging.info("Pipeline complete.")
+    else:
+        logging.info("Pipeline step complete.")
     return 0
 
 

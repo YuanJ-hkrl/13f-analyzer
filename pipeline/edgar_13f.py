@@ -128,7 +128,13 @@ def process_filing(fund_id: int, filing) -> tuple[int, int]:
 def sync_all_funds(max_filings: int = DEFAULT_QUARTERS_BACK) -> dict:
     """Download 13F data for all funds in the database."""
     set_identity(SEC_IDENTITY)
-    stats = {"funds_processed": 0, "filings_added": 0, "holdings_added": 0, "errors": []}
+    stats = {
+        "funds_processed": 0,
+        "funds_with_zero_filings": [],
+        "filings_added": 0,
+        "holdings_added": 0,
+        "errors": [],
+    }
 
     with get_connection() as conn:
         log_id = log_sync_start(conn, "edgar_13f")
@@ -145,6 +151,13 @@ def sync_all_funds(max_filings: int = DEFAULT_QUARTERS_BACK) -> dict:
             filings = fetch_fund_filings(cik, max_filings)
             stats["funds_processed"] += 1
 
+            if not filings:
+                message = f"{fund['name']} returned no 13F-HR filings for the requested {max_filings} quarters"
+                stats["funds_with_zero_filings"].append(fund["name"])
+                stats["errors"].append(message)
+                logger.warning(message)
+                continue
+
             for filing in filings:
                 try:
                     filing_id, count = process_filing(fund["id"], filing)
@@ -160,10 +173,11 @@ def sync_all_funds(max_filings: int = DEFAULT_QUARTERS_BACK) -> dict:
             logger.exception("Error fetching filings for %s", fund["name"])
 
     with get_connection() as conn:
+        status = "success" if not stats["errors"] else "failed"
         log_sync_finish(
             conn,
             log_id,
-            "success" if not stats["errors"] else "failed",
+            status,
             message=str(stats["errors"][:5]) if stats["errors"] else "OK",
             records_affected=stats["holdings_added"],
         )

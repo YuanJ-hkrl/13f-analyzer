@@ -40,8 +40,9 @@ def log_sync_start(conn, job_type: str) -> int:
         ),
         {"job_type": job_type},
     )
+    log_id = result.scalar_one()
     conn.commit()
-    return result.scalar_one()
+    return log_id
 
 
 def log_sync_finish(
@@ -153,8 +154,9 @@ def insert_filing(
             "total_holdings": total_holdings,
         },
     )
+    filing_id = result.scalar_one()
     conn.commit()
-    return result.scalar_one()
+    return filing_id
 
 
 def insert_holdings(conn, filing_id: int, fund_id: int, holdings_df: pd.DataFrame) -> int:
@@ -205,12 +207,8 @@ def upsert_daily_prices(conn, prices_df: pd.DataFrame) -> int:
             {
                 "ticker": row["ticker"],
                 "price_date": row["price_date"],
-                "open_price": row.get("open_price"),
-                "high_price": row.get("high_price"),
-                "low_price": row.get("low_price"),
-                "close_price": row["close_price"],
+                "close_price": row.get("close_price"),
                 "adj_close": row.get("adj_close"),
-                "volume": row.get("volume"),
             }
         )
 
@@ -222,15 +220,11 @@ def upsert_daily_prices(conn, prices_df: pd.DataFrame) -> int:
             ON target.ticker = source.ticker AND target.price_date = source.price_date
             WHEN MATCHED THEN
                 UPDATE SET
-                    open_price = :open_price,
-                    high_price = :high_price,
-                    low_price = :low_price,
                     close_price = :close_price,
-                    adj_close = :adj_close,
-                    volume = :volume
+                    adj_close = :adj_close
             WHEN NOT MATCHED THEN
-                INSERT (ticker, price_date, open_price, high_price, low_price, close_price, adj_close, volume)
-                VALUES (:ticker, :price_date, :open_price, :high_price, :low_price, :close_price, :adj_close, :volume);
+                INSERT (ticker, price_date, close_price, adj_close)
+                VALUES (:ticker, :price_date, :close_price, :adj_close);
             """
         ),
         records,
@@ -251,6 +245,23 @@ def get_distinct_tickers(conn) -> list[str]:
         )
     ).fetchall()
     return sorted({r[0] for r in rows if r[0]})
+
+
+def get_tickers_with_first_appearance(conn) -> dict[str, date]:
+    """Return securities keyed by ticker with their earliest 13F report date."""
+    rows = conn.execute(
+        text(
+            """
+            SELECT ticker, first_appearance_date
+            FROM securities
+            WHERE ticker IS NOT NULL
+              AND ticker != ''
+              AND first_appearance_date IS NOT NULL
+            ORDER BY ticker
+            """
+        )
+    ).fetchall()
+    return {str(row[0]).strip().upper(): row[1] for row in rows}
 
 
 def get_fund_holdings_for_period(conn, fund_id: int, report_period: date) -> pd.DataFrame:

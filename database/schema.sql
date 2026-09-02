@@ -63,6 +63,7 @@ BEGIN
         cusip           NVARCHAR(16)  NULL,
         ticker          NVARCHAR(32)  NOT NULL,
         issuer_name     NVARCHAR(512) NULL,
+        first_appearance_date DATE     NULL,
         created_at      DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
         updated_at      DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
         CONSTRAINT UQ_securities_ticker UNIQUE (ticker)
