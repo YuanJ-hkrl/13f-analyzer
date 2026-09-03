@@ -10,4 +10,5 @@ venv/
 local.settings.json
 .azure/
 *.log
+data/price_cache/
 .DS_Store

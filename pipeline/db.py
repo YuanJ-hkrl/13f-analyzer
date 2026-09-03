@@ -3,29 +3,60 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from contextlib import contextmanager
 from datetime import date, datetime
+from functools import lru_cache
 from typing import Any, Generator, Optional
 
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
-from config import DATABASE_URL, FUNDS_JSON
+from config import DATABASE_URL, DB_CONNECT_RETRIES, FUNDS_JSON
+
+logger = logging.getLogger(__name__)
 
 
+@lru_cache(maxsize=1)
 def get_engine() -> Engine:
     if not DATABASE_URL:
         raise RuntimeError(
             "DATABASE_URL is not set. Configure your Azure SQL connection string."
         )
-    return create_engine(DATABASE_URL, pool_pre_ping=True)
+    return create_engine(
+        DATABASE_URL,
+        pool_pre_ping=True,
+        fast_executemany=True,
+    )
 
 
 @contextmanager
 def get_connection() -> Generator:
     engine = get_engine()
-    with engine.connect() as conn:
+    connection = None
+    for attempt in range(1, max(1, DB_CONNECT_RETRIES) + 1):
+        try:
+            connection = engine.connect()
+            break
+        except Exception:
+            engine.dispose()
+            if attempt >= max(1, DB_CONNECT_RETRIES):
+                raise
+            delay = min(5 * attempt, 20)
+            logger.warning(
+                "Azure SQL connection attempt %d/%d failed; retrying in %d seconds",
+                attempt,
+                DB_CONNECT_RETRIES,
+                delay,
+                exc_info=True,
+            )
+            time.sleep(delay)
+
+    if connection is None:
+        raise RuntimeError("Could not establish an Azure SQL connection")
+    with connection as conn:
         yield conn
 
 
@@ -126,6 +157,24 @@ def filing_exists(conn, accession_no: str) -> bool:
     return row is not None
 
 
+def get_filing_holding_status(conn, accession_no: str) -> Optional[dict[str, Any]]:
+    """Return an existing filing and whether its imported share counts are usable."""
+    row = conn.execute(
+        text(
+            """
+            SELECT f.id,
+                   SUM(CASE WHEN h.shares > 0 THEN 1 ELSE 0 END) AS positive_share_rows
+            FROM filings f
+            LEFT JOIN holdings h ON h.filing_id = f.id
+            WHERE f.accession_no = :acc
+            GROUP BY f.id
+            """
+        ),
+        {"acc": accession_no},
+    ).mappings().first()
+    return dict(row) if row else None
+
+
 def insert_filing(
     conn,
     fund_id: int,
@@ -180,6 +229,46 @@ def insert_holdings(conn, filing_id: int, fund_id: int, holdings_df: pd.DataFram
             }
         )
 
+    conn.execute(
+        text(
+            """
+            INSERT INTO holdings
+                (filing_id, fund_id, cusip, ticker, issuer_name, security_class,
+                 shares, value_usd, put_call, investment_discretion)
+            VALUES
+                (:filing_id, :fund_id, :cusip, :ticker, :issuer_name, :security_class,
+                 :shares, :value_usd, :put_call, :investment_discretion)
+            """
+        ),
+        records,
+    )
+    conn.commit()
+    return len(records)
+
+
+def replace_holdings(conn, filing_id: int, fund_id: int, holdings_df: pd.DataFrame) -> int:
+    """Atomically replace holdings for an existing filing (used to repair old imports)."""
+    if holdings_df.empty:
+        return 0
+
+    records = []
+    for _, row in holdings_df.iterrows():
+        records.append(
+            {
+                "filing_id": filing_id,
+                "fund_id": fund_id,
+                "cusip": _safe_str(row.get("cusip")),
+                "ticker": _safe_str(row.get("ticker")),
+                "issuer_name": _safe_str(row.get("issuer_name")) or "Unknown",
+                "security_class": _safe_str(row.get("security_class")),
+                "shares": int(row.get("shares") or 0),
+                "value_usd": int(row.get("value_usd") or 0),
+                "put_call": _safe_str(row.get("put_call")),
+                "investment_discretion": _safe_str(row.get("investment_discretion")),
+            }
+        )
+
+    conn.execute(text("DELETE FROM holdings WHERE filing_id = :filing_id"), {"filing_id": filing_id})
     conn.execute(
         text(
             """

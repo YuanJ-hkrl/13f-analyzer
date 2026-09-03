@@ -83,6 +83,11 @@ python sync_all.py --step prices
 python sync_all.py --step backtest
 ```
 
+The price step downloads tickers concurrently, caches each completed ticker under
+`data/price_cache/`, and then uploads cached rows to Azure SQL in batches. Re-running
+the step with the same date range reuses completed cache files. Tune concurrency and
+batch size with `PRICE_DOWNLOAD_WORKERS` and `PRICE_UPLOAD_BATCH_SIZE` in `.env`.
+
 The pipeline:
 1. **EDGAR 13F** — Downloads quarterly 13F-HR filings for each fund in `data/funds.json`
 2. **Price Data** — Fetches OHLCV history via yfinance for all tickers in holdings
@@ -148,6 +153,14 @@ For each quarter's disclosed 13F holdings:
 2. Compute value-weighted return to next quarter (~92 days)
 3. Compare against SPY benchmark
 4. Report alpha = portfolio return − benchmark return
+
+`backtest_results` is a quarter-end 13F return proxy for comparison with external
+fund-return data; it is not an investable strategy. The separate trade-copy model
+enters at the first market close after a filing becomes public and exits/rebalances
+after the next filing. Run `database/add_trade_copy_analysis.sql`, then execute
+`python sync_all.py --step trade-copy`. Set `TRADE_COPY_UNRESOLVED_POLICY=zero_cash`
+(default) to assign unresolved copy positions a 0% return, or `renormalize` to
+exclude their weights from the trade-copy return.
 
 Limitations (MVP):
 - Uses disclosed holdings only (45-day filing lag)

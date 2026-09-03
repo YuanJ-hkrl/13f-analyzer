@@ -11,7 +11,7 @@ from edgar import Company, set_identity
 
 from config import DEFAULT_QUARTERS_BACK, SEC_IDENTITY
 from db import (
-    filing_exists,
+    get_filing_holding_status,
     get_connection,
     get_funds,
     insert_filing,
@@ -19,6 +19,7 @@ from db import (
     log_sync_finish,
     log_sync_start,
     seed_funds,
+    replace_holdings,
 )
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ def _normalize_holdings_df(df: pd.DataFrame) -> pd.DataFrame:
         "TitleOfClass": "security_class",
         "titleOfClass": "security_class",
         "Shares": "shares",
+        "SharesPrnAmount": "shares",
         "sshPrnamt": "shares",
         "Value": "value_usd",
         "value": "value_usd",
@@ -96,7 +98,8 @@ def process_filing(fund_id: int, filing) -> tuple[int, int]:
     accession_no = filing.accession_no
 
     with get_connection() as conn:
-        if filing_exists(conn, accession_no):
+        existing = get_filing_holding_status(conn, accession_no)
+        if existing and existing["positive_share_rows"] > 0:
             logger.info("Skipping existing filing %s", accession_no)
             return 0, 0
 
@@ -112,6 +115,15 @@ def process_filing(fund_id: int, filing) -> tuple[int, int]:
         total_value = int(total_value)
 
     with get_connection() as conn:
+        if existing:
+            if not holdings_df.empty and not (holdings_df["shares"] > 0).any():
+                raise ValueError(
+                    f"Parsed filing {accession_no} still contains no positive share counts"
+                )
+            count = replace_holdings(conn, existing["id"], fund_id, holdings_df)
+            logger.info("Repaired %d holdings for existing filing %s", count, accession_no)
+            return existing["id"], count
+
         filing_id = insert_filing(
             conn,
             fund_id=fund_id,

@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description="13F Analyzer data sync pipeline")
     parser.add_argument(
         "--step",
-        choices=["all", "edgar", "prices", "backtest"],
+        choices=["all", "edgar", "prices", "backtest", "trade-copy"],
         default="all",
         help="Which pipeline step to run",
     )
@@ -55,6 +55,13 @@ def main():
         logging.info("=== Running portfolio backtests ===")
         result = run_all_backtests()
         logging.info("Backtest result: %s", result)
+
+    if args.step in ("all", "trade-copy"):
+        from trade_copy import run_all_trade_copy
+
+        logging.info("=== Running investable trade-copy simulations ===")
+        result = run_all_trade_copy()
+        logging.info("Trade-copy result: %s", result)
 
     if args.step == "all":
         if edgar_result and (edgar_result.get("errors") or edgar_result.get("funds_with_zero_filings")):
