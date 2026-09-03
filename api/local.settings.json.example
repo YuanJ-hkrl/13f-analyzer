@@ -3,6 +3,6 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "python",
-    "DATABASE_URL": "mssql+pyodbc://hkrl8282:DBranklink8282@hkrl8282.database.windows.net/13f-analyzer?driver=ODBC+Driver+18+for+SQL+Server&Encrypt=yes&TrustServerCertificate=no"
+    "DATABASE_URL": "Password"
   }
 }
