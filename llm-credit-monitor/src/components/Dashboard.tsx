@@ -23,6 +23,10 @@ export function Dashboard() {
   const lastUserCount = useRef<number | null>(null);
   const primed = useRef(false);
   const lowBalanceSeen = useRef<Set<string>>(new Set());
+  /** Last server-reported user count (before demo offset) */
+  const serverUserCount = useRef<number | null>(null);
+  /** Demo-only offset so simulated signups survive poll refreshes */
+  const demoUserOffset = useRef(0);
 
   const pushAlert = useCallback(
     (title: string, body: string, tone: "user" | "balance") => {
@@ -36,13 +40,35 @@ export function Dashboard() {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
+  const applyDemoOffset = useCallback((data: MonitorSnapshot): MonitorSnapshot => {
+    if (!data.demoMode || demoUserOffset.current === 0) return data;
+    const base = data.users.totalUsers ?? 0;
+    const total = base + demoUserOffset.current;
+    return {
+      ...data,
+      users: {
+        ...data.users,
+        totalUsers: total,
+        latestUser: {
+          id: `usr_sim_${total}`,
+          email: `user${total}@example.com`,
+          createdAt: new Date().toISOString(),
+        },
+      },
+    };
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch("/api/monitor", { cache: "no-store" });
       if (!res.ok) {
         throw new Error(`Monitor API HTTP ${res.status}`);
       }
-      const data = (await res.json()) as MonitorSnapshot;
+      const raw = (await res.json()) as MonitorSnapshot;
+      if (raw.users.totalUsers != null) {
+        serverUserCount.current = raw.users.totalUsers;
+      }
+      const data = applyDemoOffset(raw);
       setSnapshot(data);
       setError(null);
 
@@ -91,7 +117,7 @@ export function Dashboard() {
     } finally {
       setLoading(false);
     }
-  }, [pushAlert]);
+  }, [applyDemoOffset, pushAlert]);
 
   useEffect(() => {
     void load();
@@ -102,8 +128,11 @@ export function Dashboard() {
   }, [load]);
 
   const simulateSignup = useCallback(() => {
-    if (!snapshot) return;
-    const nextCount = (snapshot.users.totalUsers ?? 0) + 1;
+    if (!snapshot?.demoMode) return;
+
+    demoUserOffset.current += 1;
+    const base = serverUserCount.current ?? snapshot.users.totalUsers ?? 0;
+    const nextCount = base + demoUserOffset.current;
     const createdAt = new Date().toISOString();
     const email = `user${nextCount}@example.com`;
 
@@ -122,13 +151,7 @@ export function Dashboard() {
       fetchedAt: createdAt,
     });
 
-    if (primed.current && lastUserCount.current != null) {
-      pushAlert(
-        "New user registered",
-        `${email} · total ${nextCount}`,
-        "user",
-      );
-    }
+    pushAlert("New user registered", `${email} · total ${nextCount}`, "user");
     lastUserCount.current = nextCount;
     primed.current = true;
   }, [pushAlert, snapshot]);
