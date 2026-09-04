@@ -1,12 +1,16 @@
 """Shared database access for Azure Functions API."""
 
 import os
+import time
+from threading import Lock
 from typing import Any, Optional
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 
 _engine: Optional[Engine] = None
+_cache: dict[str, tuple[float, Any]] = {}
+_cache_lock = Lock()
 
 
 def get_engine() -> Engine:
@@ -29,3 +33,16 @@ def query_one(sql: str, params: Optional[dict] = None) -> Optional[dict[str, Any
     with get_engine().connect() as conn:
         row = conn.execute(text(sql), params or {}).mappings().first()
         return dict(row) if row else None
+
+
+def cached(key: str, loader, ttl_seconds: int = 300):
+    """Small per-worker TTL cache for shared, read-only API results."""
+    now = time.monotonic()
+    with _cache_lock:
+        hit = _cache.get(key)
+        if hit and hit[0] > now:
+            return hit[1]
+    value = loader()
+    with _cache_lock:
+        _cache[key] = (now + ttl_seconds, value)
+    return value

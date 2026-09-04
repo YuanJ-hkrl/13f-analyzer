@@ -12,6 +12,9 @@ DECLARE @snapshots_deleted BIGINT;
 DECLARE @backtests_deleted BIGINT;
 DECLARE @sync_logs_deleted BIGINT;
 
+IF OBJECT_ID('dbo.fund_quarter_positions', 'U') IS NOT NULL
+    DELETE FROM dbo.fund_quarter_positions;
+
 DELETE FROM holdings;
 SET @holdings_deleted = @@ROWCOUNT;
 

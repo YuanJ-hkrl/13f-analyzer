@@ -30,6 +30,7 @@ A 13F institutional holdings analysis tool (similar to [alpha-tracer.com](https:
 | Path | Description |
 |------|-------------|
 | `database/schema.sql` | Azure SQL table definitions |
+| `database/add_performance_summaries.sql` | Persisted API position summaries and refresh procedure |
 | `data/funds.json` | Your curated fund list (32 funds) |
 | `pipeline/` | Data ingestion: EDGAR 13F, yfinance prices, backtest |
 | `api/` | Azure Functions REST API |
@@ -45,6 +46,7 @@ Run the schema against your Azure SQL instance:
 ```bash
 # Using sqlcmd or Azure Data Studio
 sqlcmd -S your-server.database.windows.net -d 13f-analyzer -U admin -P 'password' -i database/schema.sql
+sqlcmd -S your-server.database.windows.net -d 13f-analyzer -U admin -P 'password' -i database/add_performance_summaries.sql
 ```
 
 ### 2. Environment Variables
@@ -81,6 +83,7 @@ python sync_all.py
 python sync_all.py --step edgar --quarters 8
 python sync_all.py --step prices
 python sync_all.py --step backtest
+python sync_all.py --step summaries
 ```
 
 The price step downloads tickers concurrently, caches each completed ticker under

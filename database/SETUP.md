@@ -96,3 +96,20 @@ python sync_all.py
 ```
 
 会先 seed `data/funds.json` 中的 32 支基金，再拉 EDGAR 13F、yfinance 股价并计算回测。
+# Performance summaries
+
+After applying `schema.sql`, apply `add_performance_summaries.sql` once. Existing
+deployments only need the latter migration. Populate or repair the summaries with:
+
+```bash
+python pipeline/sync_all.py --step summaries
+```
+
+Normal EDGAR and full sync runs refresh these summaries automatically.
+
+If `sqlcmd` is not installed, apply the migration through the project's existing
+Python database connection:
+
+```bash
+python pipeline/apply_performance_migration.py
+```

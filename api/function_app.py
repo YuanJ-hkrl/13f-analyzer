@@ -2,7 +2,7 @@ import azure.functions as func
 import json
 import logging
 
-from shared.db import query_all, query_one
+from shared.db import cached, query_all, query_one
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -12,7 +12,10 @@ def _json_response(data, status_code: int = 200) -> func.HttpResponse:
         json.dumps(data, default=str),
         status_code=status_code,
         mimetype="application/json",
-        headers={"Access-Control-Allow-Origin": "*"},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Cache-Control": "public, max-age=60, stale-while-revalidate=300",
+        },
     )
 
 
@@ -354,7 +357,10 @@ def _fund_summaries(fund_type=None, fund_id=None):
 @app.route(route="funds")
 def list_funds(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        return _json_response({"funds": _fund_summaries(req.params.get("type"))})
+        fund_type = req.params.get("type")
+        return _json_response({"funds": cached(
+            f"funds:{fund_type or 'all'}", lambda: _fund_summaries(fund_type), 900
+        )})
     except Exception as e:
         logging.exception("Error listing funds")
         return _json_response({"error": str(e)}, 500)
@@ -364,7 +370,9 @@ def list_funds(req: func.HttpRequest) -> func.HttpResponse:
 def get_fund(req: func.HttpRequest) -> func.HttpResponse:
     fund_id = int(req.route_params["fund_id"])
     try:
-        funds = _fund_summaries(fund_id=fund_id)
+        funds = cached(
+            f"fund:{fund_id}", lambda: _fund_summaries(fund_id=fund_id), 900
+        )
         fund = funds[0] if funds else None
         if not fund:
             return _json_response({"error": "Fund not found"}, 404)
@@ -466,7 +474,37 @@ def get_holdings(req: func.HttpRequest) -> func.HttpResponse:
         """
         params = {"fund_id": fund_id, "period": period}
 
-        holdings = query_all(sql, params)
+        # The filing-to-filing comparison is materialized by the ingestion pipeline.
+        # Price-relative performance remains live because it changes after each quote sync.
+        holdings = query_all(
+            """
+            WITH selected_period AS (
+                SELECT COALESCE(CAST(:period AS DATE), MAX(report_period)) report_period
+                FROM fund_quarter_positions WHERE fund_id=:fund_id
+            )
+            SELECT p.ticker,p.cusip,p.issuer_name,p.shares,p.value_usd,p.put_call,
+                   p.report_period,p.filing_date,
+                   CAST(p.portfolio_weight*100 AS DECIMAL(8,4)) weight_pct,
+                   p.previous_shares,p.share_change,p.share_change_pct,p.change_type,
+                   CASE WHEN p.is_exit=0 AND filed.price>0 AND latest.price>0
+                        THEN (latest.price-filed.price)/filed.price END since_filed_return
+            FROM fund_quarter_positions p
+            CROSS JOIN selected_period sp
+            OUTER APPLY (
+                SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price
+                FROM daily_prices dp
+                WHERE dp.ticker=p.ticker AND dp.price_date>=p.filing_date
+                ORDER BY dp.price_date
+            ) filed
+            OUTER APPLY (
+                SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price
+                FROM daily_prices dp WHERE dp.ticker=p.ticker ORDER BY dp.price_date DESC
+            ) latest
+            WHERE p.fund_id=:fund_id AND p.report_period=sp.report_period
+            ORDER BY p.is_exit,p.value_usd DESC
+            """,
+            params,
+        )
         periods = query_all(
             "SELECT DISTINCT report_period FROM filings WHERE fund_id = :id ORDER BY report_period DESC",
             {"id": fund_id},
@@ -1173,20 +1211,23 @@ def _dashboard_consensus(latest_quarter):
 @app.route(route="dashboard")
 def dashboard(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        recent_quarters = _dashboard_recent_quarters()
-        funds = _dashboard_funds()
-        latest_row = query_one("SELECT MAX(report_period) AS quarter FROM filings")
-        latest_quarter = latest_row["quarter"] if latest_row else None
-        consensus = _dashboard_consensus(latest_quarter) if latest_quarter else []
-        grouped = {"buys": [], "sells": []}
-        for row in consensus:
-            grouped["buys" if row["side"] == "buy" else "sells"].append(row)
-        return _json_response({
-            "recent_quarters": recent_quarters,
-            "latest_quarter": latest_quarter,
-            "consensus": grouped,
-            "funds": funds,
-        })
+        def load_dashboard():
+            recent_quarters = _dashboard_recent_quarters()
+            funds = _dashboard_funds()
+            latest_row = query_one("SELECT MAX(report_period) AS quarter FROM filings")
+            latest_quarter = latest_row["quarter"] if latest_row else None
+            consensus = _dashboard_consensus(latest_quarter) if latest_quarter else []
+            grouped = {"buys": [], "sells": []}
+            for row in consensus:
+                grouped["buys" if row["side"] == "buy" else "sells"].append(row)
+            return {
+                "recent_quarters": recent_quarters,
+                "latest_quarter": latest_quarter,
+                "consensus": grouped,
+                "funds": funds,
+            }
+
+        return _json_response(cached("dashboard", load_dashboard, 300))
     except Exception as e:
         logging.exception("Error getting dashboard")
         return _json_response({"error": str(e)}, 500)

@@ -57,20 +57,23 @@ export default function FundDetail() {
   const [backtest, setBacktest] = useState<BacktestResult[]>([]);
   const [tradeCopy, setTradeCopy] = useState<TradeCopyResult[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!fundId) return;
-    Promise.all([api.fund(fundId), api.holdings(fundId), api.backtest(fundId), api.fundTradeCopy(fundId)])
-      .then(([fundData, holdingsData, backtestData, tradeCopyData]) => {
+    Promise.all([api.fund(fundId), api.holdings(fundId)])
+      .then(([fundData, holdingsData]) => {
         setFund(fundData);
         setHoldings(holdingsData.holdings);
         setLatestHoldings(holdingsData.holdings);
         setPeriods(holdingsData.available_periods);
         setSelectedPeriod(holdingsData.available_periods[0] ?? "");
-        setBacktest(backtestData.backtest);
-        setTradeCopy(tradeCopyData.trade_copy);
       }).catch((e) => setError(e.message)).finally(() => setLoading(false));
+    api.backtest(fundId).then((data) => setBacktest(data.backtest))
+      .catch((e) => setAnalyticsError(e.message));
+    api.fundTradeCopy(fundId).then((data) => setTradeCopy(data.trade_copy))
+      .catch((e) => setAnalyticsError(e.message));
   }, [fundId]);
 
   useEffect(() => {
@@ -114,6 +117,8 @@ export default function FundDetail() {
       <div className="quarter-return-card"><div className="quarter-label">Return since {fund.latest_period ?? "last report"}</div><div className={`quarter-value ${(numeric(fund.return_since_report) ?? 0) >= 0 ? "positive" : "negative"}`}>{percent(fund.return_since_report)}</div></div>
       <div className="quarter-return-card"><div className="quarter-label">Average historical holding period</div><div className="quarter-value">{holdingPeriod(fund.average_holding_period_quarters)}</div></div>
     </div>
+
+    {analyticsError && <div className="error">Performance analytics could not be loaded: {analyticsError}</div>}
 
     <section className="card"><h2>Cumulative Performance</h2>
       <p className="chart-note">Growth of $1, compounded independently. Quarter-end uses disclosed holdings; trade-copy begins after filing publication.</p>

@@ -17,7 +17,7 @@ def main():
     parser = argparse.ArgumentParser(description="13F Analyzer data sync pipeline")
     parser.add_argument(
         "--step",
-        choices=["all", "edgar", "prices", "backtest", "trade-copy"],
+        choices=["all", "edgar", "prices", "backtest", "trade-copy", "summaries"],
         default="all",
         help="Which pipeline step to run",
     )
@@ -41,6 +41,13 @@ def main():
             logging.warning("EDGAR step completed with warnings/errors.")
         else:
             logging.info("EDGAR step completed successfully.")
+
+    if args.step in ("all", "edgar", "summaries"):
+        from summaries import refresh_position_summaries
+
+        logging.info("=== Refreshing persisted position summaries ===")
+        result = refresh_position_summaries()
+        logging.info("Summary refresh result: %s", result)
 
     if args.step in ("all", "prices"):
         from price_data import sync_prices
