@@ -11,4 +11,6 @@ local.settings.json
 .azure/
 *.log
 data/price_cache/
+data/filing_samples/
+data/share_repair/
 .DS_Store

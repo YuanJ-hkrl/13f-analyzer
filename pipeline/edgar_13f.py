@@ -99,7 +99,7 @@ def process_filing(fund_id: int, filing) -> tuple[int, int]:
 
     with get_connection() as conn:
         existing = get_filing_holding_status(conn, accession_no)
-        if existing and existing["positive_share_rows"] > 0:
+        if existing and existing["holding_rows"] > 0 and existing["invalid_share_rows"] == 0:
             logger.info("Skipping existing filing %s", accession_no)
             return 0, 0
 

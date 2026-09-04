@@ -163,7 +163,10 @@ def get_filing_holding_status(conn, accession_no: str) -> Optional[dict[str, Any
         text(
             """
             SELECT f.id,
-                   SUM(CASE WHEN h.shares > 0 THEN 1 ELSE 0 END) AS positive_share_rows
+                   COUNT(h.id) AS holding_rows,
+                   SUM(CASE WHEN h.shares > 0 THEN 1 ELSE 0 END) AS positive_share_rows,
+                   SUM(CASE WHEN h.value_usd > 0 AND h.shares <= 0 THEN 1 ELSE 0 END)
+                       AS invalid_share_rows
             FROM filings f
             LEFT JOIN holdings h ON h.filing_id = f.id
             WHERE f.accession_no = :acc

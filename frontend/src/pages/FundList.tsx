@@ -57,15 +57,15 @@ export default function FundList() {
             onClick={() => navigate(`/funds/${fund.id}`)}
           >
             <div className="fund-card-main">
-              <div className="fund-card-metrics">
-                <div><span>Return since {fund.latest_period ?? "last report"}</span><strong className={fund.return_since_report == null ? "" : Number(fund.return_since_report) >= 0 ? "positive" : "negative"}>{percent(fund.return_since_report)}</strong></div>
-                <div><span>Avg historical hold</span><strong>{holdingPeriod(fund.average_holding_period_quarters)}</strong></div>
-              </div>
               <h3>{fund.name}</h3>
               <div className="fund-card-meta">
                 <span className={`badge ${fund.fund_type === "Long Only" ? "badge-long" : "badge-hedge"}`}>{fund.fund_type}</span>
                 <span>{fund.filing_count} filings</span>
                 <span>{fund.latest_period ? `Latest: ${fund.latest_period}` : "No filings"}</span>
+              </div>
+              <div className="fund-card-metrics">
+                <div><span>Return since {fund.latest_period ?? "last report"}</span><strong className={fund.return_since_report == null ? "" : Number(fund.return_since_report) >= 0 ? "positive" : "negative"}>{percent(fund.return_since_report)}</strong></div>
+                <div><span>Avg historical hold</span><strong>{holdingPeriod(fund.average_holding_period_quarters)}</strong></div>
               </div>
             </div>
             <div className="fund-top-positions"><span>Top 5 positions</span><ol>{fund.top_positions.map((position) => <li key={`${position.ticker}-${position.issuer_name}`}><b>{position.ticker || "—"}</b><small>{position.issuer_name}</small></li>)}</ol></div>

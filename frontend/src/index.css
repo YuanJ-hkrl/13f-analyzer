@@ -157,7 +157,7 @@ a:hover {
 
 .fund-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1rem;
 }
 
@@ -165,13 +165,13 @@ a:hover {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 1.25rem;
+  padding: 1rem;
   cursor: pointer;
   transition: border-color 0.15s, transform 0.15s;
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) minmax(380px, 0.9fr);
+  grid-template-columns: minmax(0, 0.9fr) minmax(210px, 1.1fr);
   align-items: stretch;
-  gap: 2rem;
+  gap: 1rem;
 }
 
 .fund-card:hover {
@@ -180,8 +180,8 @@ a:hover {
 }
 
 .fund-card h3 {
-  font-size: 1.15rem;
-  margin: 1rem 0 0.55rem;
+  font-size: 1.05rem;
+  margin: 0 0 0.45rem;
 }
 
 .fund-card .meta {
@@ -294,18 +294,22 @@ tr:hover td {
   height: 320px;
 }
 .fund-card-main { min-width:0; }
-.fund-card-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1.5rem; padding-bottom:0.9rem; border-bottom:1px solid var(--border); }
+.fund-card-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0.75rem; margin-top:0.8rem; padding-top:0.75rem; border-top:1px solid var(--border); }
 .fund-card-metrics span, .fund-top-positions > span { display:block; color:var(--text-secondary); font-size:0.72rem; text-transform:uppercase; letter-spacing:0.04em; }
-.fund-card-metrics strong { display:block; margin-top:0.3rem; font-size:1.4rem; line-height:1.1; }
-.fund-card-meta { display:flex; align-items:center; flex-wrap:wrap; gap:0.55rem 0.8rem; color:var(--text-secondary); font-size:0.82rem; }
-.fund-card-meta > span:not(:first-child)::before { content:"·"; margin-right:0.8rem; color:var(--text-secondary); }
-.fund-top-positions { min-width:0; padding-left:1.5rem; border-left:1px solid var(--border); }
-.fund-top-positions ol { margin:0.5rem 0 0; padding-left:1.5rem; columns:1; }
-.fund-top-positions li { padding:0.13rem 0; font-size:0.82rem; white-space:nowrap; }
-.fund-top-positions li b { display:inline-block; width:4.5rem; margin-right:0.5rem; }
+.fund-card-metrics strong { display:block; margin-top:0.25rem; font-size:1.2rem; line-height:1.1; }
+.fund-card-meta { display:flex; align-items:center; flex-wrap:wrap; gap:0.4rem 0.55rem; color:var(--text-secondary); font-size:0.75rem; }
+.fund-card-meta > span:not(:first-child)::before { content:"·"; margin-right:0.55rem; color:var(--text-secondary); }
+.fund-top-positions { min-width:0; padding-left:1rem; border-left:1px solid var(--border); }
+.fund-top-positions ol { margin:0.4rem 0 0; padding-left:1.35rem; columns:1; }
+.fund-top-positions li { padding:0.08rem 0; font-size:0.76rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.fund-top-positions li b { display:inline-block; width:3.6rem; margin-right:0.35rem; }
 .fund-top-positions li small { display:inline; color:var(--text-secondary); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  .fund-grid { grid-template-columns:1fr; }
+}
+
+@media (max-width: 650px) {
   .fund-card { grid-template-columns:1fr; gap:1rem; }
   .fund-top-positions { padding:1rem 0 0; border-left:0; border-top:1px solid var(--border); }
 }

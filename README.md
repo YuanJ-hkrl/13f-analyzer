@@ -86,6 +86,16 @@ python sync_all.py --step backtest
 python sync_all.py --step summaries
 ```
 
+Repair legacy filings whose positive-value positions were imported with zero shares:
+
+```bash
+python pipeline/repair_shares.py --dry-run
+python pipeline/repair_shares.py
+```
+
+The repair command archives source and normalized CSVs, validates each filing,
+updates it transactionally, and refreshes affected summaries and analytics.
+
 The price step downloads tickers concurrently, caches each completed ticker under
 `data/price_cache/`, and then uploads cached rows to Azure SQL in batches. Re-running
 the step with the same date range reuses completed cache files. Tune concurrency and
