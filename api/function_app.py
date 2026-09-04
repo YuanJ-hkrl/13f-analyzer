@@ -84,12 +84,21 @@ def get_security(req: func.HttpRequest) -> func.HttpResponse:
 
         history = query_all(
             """
-            WITH periods AS (
+            WITH target_cusips AS (
+              SELECT DISTINCT UPPER(TRIM(cusip)) cusip
+              FROM holdings
+              WHERE UPPER(TRIM(ticker))=:ticker
+                AND cusip IS NOT NULL AND TRIM(cusip)<>''
+            ), periods AS (
               SELECT DISTINCT report_period FROM filings
             ), first_owned AS (
               SELECT MIN(f.report_period) report_period
               FROM filings f JOIN holdings h ON h.filing_id=f.id
-              WHERE UPPER(TRIM(h.ticker))=:ticker AND h.shares>0
+              WHERE (UPPER(TRIM(h.ticker))=:ticker OR EXISTS (
+                       SELECT 1 FROM target_cusips tc
+                       WHERE tc.cusip=UPPER(TRIM(h.cusip))))
+                AND (h.put_call IS NULL OR TRIM(h.put_call)='')
+                AND h.shares>0
             ), ranked AS (
               SELECT f.id,f.fund_id,f.report_period,
                      ROW_NUMBER() OVER(PARTITION BY f.fund_id,f.report_period ORDER BY f.filing_date DESC,f.id DESC) rn
@@ -98,7 +107,11 @@ def get_security(req: func.HttpRequest) -> func.HttpResponse:
               SELECT r.report_period,r.fund_id,
                      SUM(h.value_usd) position_value,SUM(h.shares) shares
               FROM ranked r JOIN holdings h ON h.filing_id=r.id
-              WHERE r.rn=1 AND UPPER(TRIM(h.ticker))=:ticker
+              WHERE r.rn=1
+                AND (UPPER(TRIM(h.ticker))=:ticker OR EXISTS (
+                       SELECT 1 FROM target_cusips tc
+                       WHERE tc.cusip=UPPER(TRIM(h.cusip))))
+                AND (h.put_call IS NULL OR TRIM(h.put_call)='')
               GROUP BY r.report_period,r.fund_id
             )
             SELECT qtr.report_period,
@@ -137,50 +150,211 @@ def get_security(req: func.HttpRequest) -> func.HttpResponse:
             SELECT *,CASE WHEN previous_shares=0 AND shares>0 THEN 'new' WHEN shares=0 AND previous_shares>0 THEN 'exit' WHEN shares>previous_shares THEN 'add' WHEN shares<previous_shares THEN 'reduce' ELSE 'unchanged' END action
             FROM compared WHERE shares<>previous_shares ORDER BY ABS(shares-previous_shares) DESC
             """, params)
-        early = query_all(
+        position_changes = query_all(
             """
-            WITH firsts AS (
-              SELECT f.fund_id,MIN(f.filing_date) first_filing_date,MIN(f.report_period) first_report_period
-              FROM filings f JOIN holdings h ON h.filing_id=f.id WHERE UPPER(TRIM(h.ticker))=:ticker GROUP BY f.fund_id)
-            SELECT fu.id fund_id,fu.name,fu.fund_type,x.first_report_period,x.first_filing_date,
-                   ep.price entry_price,lp.price latest_price,
-                   CASE WHEN ep.price>0 THEN (lp.price-ep.price)/ep.price END return_since_first
-            FROM firsts x JOIN funds fu ON fu.id=x.fund_id
-            OUTER APPLY(SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price FROM daily_prices dp WHERE dp.ticker=:ticker AND dp.price_date>x.first_filing_date ORDER BY dp.price_date) ep
-            OUTER APPLY(SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price FROM daily_prices dp WHERE dp.ticker=:ticker ORDER BY dp.price_date DESC) lp
-            ORDER BY x.first_report_period,x.first_filing_date
+            WITH target_cusips AS (
+              SELECT DISTINCT UPPER(TRIM(cusip)) cusip
+              FROM holdings
+              WHERE UPPER(TRIM(ticker))=:ticker
+                AND cusip IS NOT NULL AND TRIM(cusip)<>''
+            ), recent_periods AS (
+              SELECT TOP 8 report_period
+              FROM filings
+              GROUP BY report_period
+              ORDER BY report_period DESC
+            ), ranked_filings AS (
+              SELECT f.id,f.fund_id,f.report_period,
+                     ROW_NUMBER() OVER(
+                       PARTITION BY f.fund_id,f.report_period
+                       ORDER BY f.filing_date DESC,f.id DESC) rn
+              FROM filings f
+            ), matched_holdings AS (
+              SELECT h.filing_id,SUM(h.shares) shares
+              FROM holdings h
+              WHERE (UPPER(TRIM(h.ticker))=:ticker OR EXISTS (
+                       SELECT 1 FROM target_cusips tc
+                       WHERE tc.cusip=UPPER(TRIM(h.cusip))))
+                AND (h.put_call IS NULL OR TRIM(h.put_call)='')
+              GROUP BY h.filing_id
+            ), filing_positions AS (
+              SELECT rf.fund_id,rf.report_period,COALESCE(mh.shares,0) shares
+              FROM ranked_filings rf
+              LEFT JOIN matched_holdings mh ON mh.filing_id=rf.id
+              WHERE rf.rn=1
+            ), compared AS (
+              SELECT fund_id,report_period,shares,
+                     LAG(shares,1,0) OVER(
+                       PARTITION BY fund_id ORDER BY report_period) previous_shares
+              FROM filing_positions
+            ), classified AS (
+              SELECT c.*,
+                     CASE WHEN c.shares>0 AND c.previous_shares=0 THEN 'new'
+                          WHEN c.shares>c.previous_shares THEN 'add'
+                          WHEN c.shares=0 AND c.previous_shares>0 THEN 'exit'
+                          WHEN c.shares<c.previous_shares THEN 'reduce'
+                          ELSE 'unchanged' END action
+              FROM compared c
+            ), relevant_funds AS (
+              SELECT DISTINCT fund_id FROM classified
+              WHERE report_period IN (SELECT report_period FROM recent_periods)
+                AND (shares>0 OR previous_shares>0)
+            )
+            SELECT c.fund_id,fu.name,fu.fund_type,c.report_period,
+                   c.shares,c.previous_shares,c.action
+            FROM classified c
+            JOIN relevant_funds r ON r.fund_id=c.fund_id
+            JOIN funds fu ON fu.id=c.fund_id
+            WHERE c.report_period IN (SELECT report_period FROM recent_periods)
+            ORDER BY fu.name,c.report_period DESC
             """, params)
+        position_change_quarters = query_all(
+            """SELECT TOP 8 report_period
+               FROM filings GROUP BY report_period ORDER BY report_period DESC"""
+        )
         prices = query_all(
             """WITH p AS (SELECT price_date,COALESCE(adj_close,close_price) price,ROW_NUMBER() OVER(ORDER BY price_date) rn FROM daily_prices WHERE ticker=:ticker)
                SELECT price_date,price FROM p WHERE rn%5=1 ORDER BY price_date""", params)
         return _json_response({"security": security, "history": history, "owners": owners,
                                "buyers": [r for r in activity if r["action"] in ("new","add")],
                                "sellers": [r for r in activity if r["action"] in ("reduce","exit")],
-                               "early_investors": early, "prices": prices})
+                               "position_changes": {
+                                   "quarters": [r["report_period"] for r in position_change_quarters],
+                                   "rows": position_changes,
+                               },
+                               "prices": prices})
     except Exception as e:
         logging.exception("Error loading security")
         return _json_response({"error": str(e)}, 500)
 
 
-@app.route(route="funds")
-def list_funds(req: func.HttpRequest) -> func.HttpResponse:
-    fund_type = req.params.get("type")
-    sql = """
-        SELECT f.id, f.name, f.fund_type, f.cik,
-               (SELECT COUNT(*) FROM filings fl WHERE fl.fund_id = f.id) AS filing_count,
-               (SELECT MAX(fl.report_period) FROM filings fl WHERE fl.fund_id = f.id) AS latest_period
-        FROM funds f
-        WHERE f.is_active = 1
-    """
+def _fund_summaries(fund_type=None, fund_id=None):
+    filters = ["f.is_active = 1"]
     params = {}
     if fund_type:
-        sql += " AND f.fund_type = :fund_type"
+        filters.append("f.fund_type = :fund_type")
         params["fund_type"] = fund_type
-    sql += " ORDER BY f.fund_type, f.name"
+    if fund_id is not None:
+        filters.append("f.id = :fund_id")
+        params["fund_id"] = fund_id
+    where_clause = " AND ".join(filters)
+    funds = query_all(
+        f"""
+        WITH filing_rank AS (
+          SELECT fl.*,
+                 ROW_NUMBER() OVER(PARTITION BY fl.fund_id
+                   ORDER BY fl.report_period DESC,fl.filing_date DESC,fl.id DESC) rn
+          FROM filings fl
+        ), quarterly_filing_rank AS (
+          SELECT fl.*,
+                 ROW_NUMBER() OVER(PARTITION BY fl.fund_id,fl.report_period
+                   ORDER BY fl.filing_date DESC,fl.id DESC) quarter_rn
+          FROM filings fl
+        ), fund_filings AS (
+          SELECT id,fund_id,report_period,
+                 ROW_NUMBER() OVER(PARTITION BY fund_id ORDER BY report_period) filing_sequence
+          FROM quarterly_filing_rank WHERE quarter_rn=1
+        ), current_filings AS (
+          SELECT * FROM filing_rank WHERE rn=1
+        ), current_positions AS (
+          SELECT cf.fund_id,cf.report_period,
+                 UPPER(TRIM(COALESCE(NULLIF(h.cusip,''),h.ticker))) position_key,
+                 MAX(h.ticker) ticker,MAX(h.issuer_name) issuer_name,
+                 SUM(h.value_usd) position_value
+          FROM current_filings cf JOIN holdings h ON h.filing_id=cf.id
+          WHERE (h.put_call IS NULL OR TRIM(h.put_call)='')
+          GROUP BY cf.fund_id,cf.report_period,
+                   UPPER(TRIM(COALESCE(NULLIF(h.cusip,''),h.ticker)))
+        ), historical_positions AS (
+          SELECT ff.fund_id,ff.report_period,ff.filing_sequence,
+                 UPPER(TRIM(COALESCE(NULLIF(h.cusip,''),h.ticker))) position_key,
+                 SUM(h.value_usd) position_value
+          FROM fund_filings ff JOIN holdings h ON h.filing_id=ff.id
+          WHERE (h.put_call IS NULL OR TRIM(h.put_call)='') AND h.value_usd>0
+          GROUP BY ff.fund_id,ff.report_period,ff.filing_sequence,
+                   UPPER(TRIM(COALESCE(NULLIF(h.cusip,''),h.ticker)))
+        ), position_islands AS (
+          SELECT hp.*,
+                 hp.filing_sequence-ROW_NUMBER() OVER(
+                   PARTITION BY hp.fund_id,hp.position_key ORDER BY hp.filing_sequence) episode_group
+          FROM historical_positions hp WHERE hp.position_value>0
+        ), holding_episodes AS (
+          SELECT fund_id,position_key,episode_group,
+                 MIN(filing_sequence) first_sequence,MAX(filing_sequence) last_sequence,
+                 COUNT(*) quarters_held
+          FROM position_islands
+          GROUP BY fund_id,position_key,episode_group
+        ), completed_holding_periods AS (
+          SELECT he.* FROM holding_episodes he
+          WHERE EXISTS(SELECT 1 FROM fund_filings ff
+                       WHERE ff.fund_id=he.fund_id AND ff.filing_sequence>he.last_sequence)
+        ), holding_periods AS (
+          SELECT fund_id,AVG(CAST(quarters_held AS FLOAT)) average_holding_period_quarters
+          FROM completed_holding_periods GROUP BY fund_id
+        ), position_returns AS (
+          SELECT cp.fund_id,cp.position_value,
+                 CASE WHEN qtr.price>0 AND latest.price>0
+                      THEN (latest.price-qtr.price)/qtr.price END position_return
+          FROM current_positions cp
+          OUTER APPLY(SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price
+                      FROM daily_prices dp WHERE dp.ticker=cp.ticker
+                        AND dp.price_date<=cp.report_period ORDER BY dp.price_date DESC) qtr
+          OUTER APPLY(SELECT TOP 1 CAST(COALESCE(dp.adj_close,dp.close_price) AS FLOAT) price
+                      FROM daily_prices dp WHERE dp.ticker=cp.ticker ORDER BY dp.price_date DESC) latest
+        ), fund_returns AS (
+          SELECT fund_id,
+                 SUM(CASE WHEN position_return IS NOT NULL AND position_value>0
+                          THEN CAST(position_value AS FLOAT)*position_return ELSE 0 END)
+                 /NULLIF(SUM(CASE WHEN position_return IS NOT NULL AND position_value>0
+                                  THEN CAST(position_value AS FLOAT) ELSE 0 END),0)
+                   return_since_report
+          FROM position_returns GROUP BY fund_id
+        )
+        SELECT f.id,f.name,f.fund_type,f.cik,
+               (SELECT COUNT(*) FROM filings fl WHERE fl.fund_id=f.id) filing_count,
+               cf.report_period latest_period,cf.filing_date latest_filing_date,
+               cf.total_value latest_total_value,
+               fr.return_since_report,hp.average_holding_period_quarters
+        FROM funds f
+        LEFT JOIN current_filings cf ON cf.fund_id=f.id
+        LEFT JOIN fund_returns fr ON fr.fund_id=f.id
+        LEFT JOIN holding_periods hp ON hp.fund_id=f.id
+        WHERE {where_clause}
+        ORDER BY f.fund_type,f.name
+        """,
+        params,
+    )
+    top_positions = query_all(
+        f"""
+        WITH filing_rank AS (
+          SELECT fl.*,ROW_NUMBER() OVER(PARTITION BY fl.fund_id
+            ORDER BY fl.report_period DESC,fl.filing_date DESC,fl.id DESC) rn
+          FROM filings fl
+        ), positions AS (
+          SELECT f.id fund_id,MAX(h.ticker) ticker,MAX(h.issuer_name) issuer_name,
+                 SUM(h.value_usd) position_value,
+                 ROW_NUMBER() OVER(PARTITION BY f.id ORDER BY SUM(h.value_usd) DESC) position_rank
+          FROM funds f JOIN filing_rank fl ON fl.fund_id=f.id AND fl.rn=1
+          JOIN holdings h ON h.filing_id=fl.id
+          WHERE {where_clause} AND (h.put_call IS NULL OR TRIM(h.put_call)='')
+          GROUP BY f.id,UPPER(TRIM(COALESCE(NULLIF(h.cusip,''),h.ticker)))
+        )
+        SELECT fund_id,ticker,issuer_name,position_value
+        FROM positions WHERE position_rank<=5 ORDER BY fund_id,position_rank
+        """,
+        params,
+    )
+    by_fund = {row["id"]: [] for row in funds}
+    for position in top_positions:
+        by_fund.setdefault(position["fund_id"], []).append(position)
+    for fund in funds:
+        fund["top_positions"] = by_fund.get(fund["id"], [])
+    return funds
 
+
+@app.route(route="funds")
+def list_funds(req: func.HttpRequest) -> func.HttpResponse:
     try:
-        funds = query_all(sql, params)
-        return _json_response({"funds": funds})
+        return _json_response({"funds": _fund_summaries(req.params.get("type"))})
     except Exception as e:
         logging.exception("Error listing funds")
         return _json_response({"error": str(e)}, 500)
@@ -190,19 +364,8 @@ def list_funds(req: func.HttpRequest) -> func.HttpResponse:
 def get_fund(req: func.HttpRequest) -> func.HttpResponse:
     fund_id = int(req.route_params["fund_id"])
     try:
-        fund = query_one(
-            """
-            SELECT f.id, f.name, f.fund_type, f.cik,
-                   (SELECT COUNT(*) FROM filings fl WHERE fl.fund_id = f.id) AS filing_count,
-                   (SELECT MAX(fl.report_period) FROM filings fl WHERE fl.fund_id = f.id) AS latest_period,
-                   (SELECT TOP 1 fl.total_value FROM filings fl
-                    WHERE fl.fund_id = f.id
-                    ORDER BY fl.report_period DESC, fl.filing_date DESC, fl.id DESC
-                   ) AS latest_total_value
-            FROM funds f WHERE f.id = :id
-            """,
-            {"id": fund_id},
-        )
+        funds = _fund_summaries(fund_id=fund_id)
+        fund = funds[0] if funds else None
         if not fund:
             return _json_response({"error": "Fund not found"}, 404)
         return _json_response(fund)

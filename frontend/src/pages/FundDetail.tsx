@@ -22,6 +22,10 @@ const shareCount = (value: number) => {
   if (absolute >= 1_000) return `${(absolute / 1_000).toFixed(1)}K`;
   return absolute.toLocaleString("en-US");
 };
+const holdingPeriod = (value: number | string | null | undefined) => {
+  const quarters = numeric(value);
+  return quarters == null ? "—" : `${quarters.toFixed(1)} quarters`;
+};
 
 const changeColors: Record<Holding["change_type"], string> = {
   new: "#080a0e", added: "#10b981", reduced: "#ef4444", exit: "#ef4444", unchanged: "#64748b",
@@ -45,7 +49,7 @@ function cumulativeSeries(rows: { date: string; value: number | null }[]) {
 export default function FundDetail() {
   const { id } = useParams<{ id: string }>();
   const fundId = Number(id);
-  const [fund, setFund] = useState<(Fund & { latest_total_value?: number }) | null>(null);
+  const [fund, setFund] = useState<Fund | null>(null);
   const [holdings, setHoldings] = useState<Holding[]>([]);
   const [latestHoldings, setLatestHoldings] = useState<Holding[]>([]);
   const [periods, setPeriods] = useState<string[]>([]);
@@ -103,8 +107,13 @@ export default function FundDetail() {
     <Link to="/funds" className="back-link">&larr; Back to Funds</Link>
     <div className="page-header"><h1>{fund.name}</h1><p>
       <span className={`badge ${fund.fund_type === "Long Only" ? "badge-long" : "badge-hedge"}`}>{fund.fund_type}</span>
-      {` · CIK ${fund.cik}`}{fund.latest_total_value != null && ` · 13F AUM ${money(fund.latest_total_value)}`}
+      {` · CIK ${fund.cik}`}{fund.latest_total_value != null && ` · 13F AUM ${money(Number(fund.latest_total_value))}`}
     </p></div>
+
+    <div className="fund-detail-metrics">
+      <div className="quarter-return-card"><div className="quarter-label">Return since {fund.latest_period ?? "last report"}</div><div className={`quarter-value ${(numeric(fund.return_since_report) ?? 0) >= 0 ? "positive" : "negative"}`}>{percent(fund.return_since_report)}</div></div>
+      <div className="quarter-return-card"><div className="quarter-label">Average historical holding period</div><div className="quarter-value">{holdingPeriod(fund.average_holding_period_quarters)}</div></div>
+    </div>
 
     <section className="card"><h2>Cumulative Performance</h2>
       <p className="chart-note">Growth of $1, compounded independently. Quarter-end uses disclosed holdings; trade-copy begins after filing publication.</p>

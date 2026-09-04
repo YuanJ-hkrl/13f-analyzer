@@ -5,6 +5,18 @@ export interface Fund {
   cik: string;
   filing_count: number;
   latest_period: string | null;
+  latest_filing_date: string | null;
+  latest_total_value: number | string | null;
+  return_since_report: number | string | null;
+  average_holding_period_quarters: number | string | null;
+  top_positions: FundTopPosition[];
+}
+
+export interface FundTopPosition {
+  fund_id: number;
+  ticker: string | null;
+  issuer_name: string;
+  position_value: number | string;
 }
 
 export interface Holding {
@@ -76,11 +88,12 @@ export interface SecuritySearchResult { ticker:string; company:string; owner_cou
 export interface SecurityHistory { report_period:string; fund_count:number; aggregate_value:number|string; aggregate_shares:number|string; quarter_price:number|string|null; }
 export interface SecurityFundPosition { fund_id:number; name:string; fund_type:string; report_period:string; value_usd:number|string; shares:number|string; portfolio_weight:number|string; first_owned:string; }
 export interface SecurityActivity { fund_id:number; name:string; fund_type:string; shares:number|string; previous_shares:number|string; value_usd:number|string; previous_value:number|string; action:"new"|"add"|"reduce"|"exit"; }
-export interface EarlyInvestor { fund_id:number; name:string; fund_type:string; first_report_period:string; first_filing_date:string; entry_price:number|string|null; latest_price:number|string|null; return_since_first:number|string|null; }
+export type SecurityPositionAction = "new" | "add" | "reduce" | "exit" | "unchanged";
+export interface SecurityPositionChange { fund_id:number; name:string; fund_type:string; report_period:string; shares:number|string; previous_shares:number|string; action:SecurityPositionAction; }
 export interface SecurityDetailData {
   security:{ticker:string;company:string;first_appearance:string;latest_price:number|string|null;price_date:string|null};
   history:SecurityHistory[]; owners:SecurityFundPosition[]; buyers:SecurityActivity[]; sellers:SecurityActivity[];
-  early_investors:EarlyInvestor[]; prices:TickerPricePoint[];
+  position_changes:{quarters:string[];rows:SecurityPositionChange[]}; prices:TickerPricePoint[];
 }
 
 export interface ConsensusChange {
@@ -162,7 +175,7 @@ export const api = {
   dashboard: () => fetchApi<DashboardData>("/dashboard"),
   funds: (type?: string) =>
     fetchApi<{ funds: Fund[] }>(type ? `/funds?type=${encodeURIComponent(type)}` : "/funds"),
-  fund: (id: number) => fetchApi<Fund & { latest_total_value: number }>(`/funds/${id}`),
+  fund: (id: number) => fetchApi<Fund>(`/funds/${id}`),
   holdings: (id: number, period?: string) =>
     fetchApi<{ holdings: Holding[]; available_periods: string[] }>(
       period ? `/funds/${id}/holdings?period=${period}` : `/funds/${id}/holdings`
