@@ -143,6 +143,14 @@ export interface TradeCopyRanking {
   top10_hit_rate: number | string | null;
 }
 
+export interface StrategyBacktestFund {
+  fund_id:number; name:string; fund_type:string; periods:number;
+  cumulative_return:number|string; annualized_return:number|string|null;
+  trade_count:number; resolved_trades:number; winning_trades:number;
+  win_rate:number|string|null; average_trade_return:number|string|null;
+  price_coverage:number|string; first_entry:string; last_exit:string;
+}
+
 export type QuarterlyChangeType = "new" | "add" | "reduce" | "exit";
 
 export interface QuarterlyChange {
@@ -192,6 +200,8 @@ export const api = {
   filings: (id: number) => fetchApi<{ filings: unknown[] }>(`/funds/${id}/filings`),
   tradeCopyRankings: () =>
     fetchApi<{ rankings: TradeCopyRanking[] }>("/trade-copy/rankings"),
+  strategyBacktests: (strategy: "top10" | "new_to_exit") =>
+    fetchApi<{ strategy:string; funds:StrategyBacktestFund[] }>(`/strategy-backtests?strategy=${strategy}`),
   quarterlyChangeQuarters: () =>
     fetchApi<{ quarters: string[] }>("/quarterly-changes/quarters"),
   quarterlyChanges: (quarter: string, fundType: string, rankBy: string) => {

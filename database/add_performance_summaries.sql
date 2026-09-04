@@ -33,7 +33,16 @@ BEGIN
     CREATE INDEX IX_fqp_period_change
         ON dbo.fund_quarter_positions(report_period DESC, change_type)
         INCLUDE (fund_id, ticker, shares, value_usd, previous_value);
+    CREATE INDEX IX_fqp_cusip_period
+        ON dbo.fund_quarter_positions(cusip, report_period DESC)
+        INCLUDE (fund_id, ticker, shares, value_usd, is_exit);
 END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id=OBJECT_ID('dbo.fund_quarter_positions') AND name='IX_fqp_cusip_period')
+    CREATE INDEX IX_fqp_cusip_period
+        ON dbo.fund_quarter_positions(cusip, report_period DESC)
+        INCLUDE (fund_id, ticker, shares, value_usd, is_exit);
 GO
 
 CREATE OR ALTER PROCEDURE dbo.refresh_fund_quarter_positions

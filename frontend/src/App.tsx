@@ -10,6 +10,7 @@ const TradeCopyFundDetail = lazy(() => import("./pages/TradeCopyFundDetail"));
 const QuarterlyChanges = lazy(() => import("./pages/QuarterlyChanges"));
 const Securities = lazy(() => import("./pages/Securities"));
 const SecurityDetail = lazy(() => import("./pages/SecurityDetail"));
+const StrategyBacktests = lazy(() => import("./pages/StrategyBacktests"));
 
 const MAX_CACHED_PAGES = 12;
 
@@ -46,6 +47,7 @@ function PageRoutes() {
           <Route path="/trade-copy" element={<TradeCopyRankings />} />
           <Route path="/trade-copy/funds/:id" element={<TradeCopyFundDetail />} />
           <Route path="/quarterly-changes" element={<QuarterlyChanges />} />
+          <Route path="/backtests" element={<StrategyBacktests />} />
         </Routes>
       </Suspense>
     </div>;
@@ -67,6 +69,7 @@ function Layout() {
           <NavLink to="/securities">Securities</NavLink>
           <NavLink to="/trade-copy">Trade Copy</NavLink>
           <NavLink to="/quarterly-changes">Quarterly Changes</NavLink>
+          <NavLink to="/backtests">Backtests</NavLink>
         </nav>
       </aside>
       <main className="main-content">
