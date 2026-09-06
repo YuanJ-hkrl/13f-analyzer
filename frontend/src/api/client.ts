@@ -201,7 +201,7 @@ export const api = {
   tradeCopyRankings: () =>
     fetchApi<{ rankings: TradeCopyRanking[] }>("/trade-copy/rankings"),
   strategyBacktests: (strategy: "top10" | "new_to_exit") =>
-    fetchApi<{ strategy:string; funds:StrategyBacktestFund[] }>(`/strategy-backtests?strategy=${strategy}`),
+    fetchApi<{ strategy:string; weighting:"equal"; funds:StrategyBacktestFund[] }>(`/strategy-backtests?strategy=${strategy}`),
   quarterlyChangeQuarters: () =>
     fetchApi<{ quarters: string[] }>("/quarterly-changes/quarters"),
   quarterlyChanges: (quarter: string, fundType: string, rankBy: string) => {

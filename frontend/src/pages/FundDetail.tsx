@@ -46,6 +46,18 @@ function cumulativeSeries(rows: { date: string; value: number | null }[]) {
   });
 }
 
+function annualizedReturn(rows: { start: string; end: string; value: number | null }[]) {
+  const valid = rows.filter((row) => row.value != null && row.start && row.end);
+  if (valid.length === 0) return null;
+  const firstDate = new Date(valid[0].start).getTime();
+  const lastDate = new Date(valid[valid.length - 1].end).getTime();
+  const elapsedDays = (lastDate - firstDate) / 86_400_000;
+  if (!Number.isFinite(elapsedDays) || elapsedDays <= 0) return null;
+  const growth = valid.reduce((value, row) => value * (1 + Number(row.value)), 1);
+  if (!Number.isFinite(growth) || growth < 0) return null;
+  return Math.pow(growth, 365 / elapsedDays) - 1;
+}
+
 export default function FundDetail() {
   const { id } = useParams<{ id: string }>();
   const fundId = Number(id);
@@ -96,6 +108,13 @@ export default function FundDetail() {
     return [...merged.values()].sort((a, b) => a.date.localeCompare(b.date));
   }, [backtest, tradeCopy]);
 
+  const quarterEndIrr = useMemo(() => annualizedReturn(backtest.map((row) => ({
+    start: row.period_start, end: row.period_end, value: numeric(row.total_return),
+  }))), [backtest]);
+  const tradeCopyIrr = useMemo(() => annualizedReturn(tradeCopy.map((row) => ({
+    start: row.entry_date, end: row.exit_date, value: numeric(row.total_return),
+  }))), [tradeCopy]);
+
   const alphaData = backtest.map((row) => ({ period: row.period_start.slice(0, 7), alpha: (numeric(row.alpha) ?? 0) * 100 }));
   const treeData = latestHoldings.filter((row) => row.value_usd > 0 && row.change_type !== "exit").map((row) => ({
     name: row.ticker || row.issuer_name, size: row.value_usd, weight: numeric(row.weight_pct) ?? 0,
@@ -114,6 +133,8 @@ export default function FundDetail() {
     </p></div>
 
     <div className="fund-detail-metrics">
+      <div className="quarter-return-card"><div className="quarter-label">Quarter-end IRR</div><div className={`quarter-value ${(quarterEndIrr ?? 0) >= 0 ? "positive" : "negative"}`}>{percent(quarterEndIrr)}</div></div>
+      <div className="quarter-return-card"><div className="quarter-label">Trade Copy IRR</div><div className={`quarter-value ${(tradeCopyIrr ?? 0) >= 0 ? "positive" : "negative"}`}>{percent(tradeCopyIrr)}</div></div>
       <div className="quarter-return-card"><div className="quarter-label">Return since {fund.latest_period ?? "last report"}</div><div className={`quarter-value ${(numeric(fund.return_since_report) ?? 0) >= 0 ? "positive" : "negative"}`}>{percent(fund.return_since_report)}</div></div>
       <div className="quarter-return-card"><div className="quarter-label">Average historical holding period</div><div className="quarter-value">{holdingPeriod(fund.average_holding_period_quarters)}</div></div>
     </div>

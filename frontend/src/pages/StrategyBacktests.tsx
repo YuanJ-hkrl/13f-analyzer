@@ -26,7 +26,7 @@ export default function StrategyBacktests() {
       <label>Rank by{" "}<select className="period-select" value={sortKey} onChange={(e)=>setSortKey(e.target.value as SortKey)}>
         <option value="annualized_return">Annualized return</option><option value="cumulative_return">Cumulative return</option>
         <option value="win_rate">Trade win rate</option><option value="average_trade_return">Average trade return</option></select></label></div>
-    <p className="chart-note">{descriptions[strategy]} Returns are gross of transaction costs; unresolved price periods are excluded.</p>
+    <p className="chart-note">{descriptions[strategy]} Each active resolved trade receives 1/N weight in every period; weights reset as holdings change. Returns are gross of transaction costs; unresolved price periods are excluded.</p>
     {error && <div className="error">{error}</div>}
     {loading ? <div className="loading">Loading strategy results...</div> : <div className="card table-scroll"><table><thead><tr>
       <th>#</th><th>Fund</th><th>Group</th><th className="text-right">Ann. return</th><th className="text-right">Cumulative</th>

@@ -836,7 +836,7 @@ def strategy_backtests(req: func.HttpRequest) -> func.HttpResponse:
         return _json_response({"error": "invalid strategy"}, 400)
     try:
         rows = cached(
-            f"strategy-backtests:{strategy}",
+            f"strategy-backtests:v2:equal-weight:{strategy}",
             lambda: query_all(
                 """
                 WITH filing_sequence AS (
@@ -892,11 +892,19 @@ def strategy_backtests(req: func.HttpRequest) -> func.HttpResponse:
                            AVG(CASE WHEN is_closed=1 AND resolved_periods=periods THEN episode_return END)
                                average_trade_return
                     FROM episodes GROUP BY fund_id
+                ), eligible_weighted AS (
+                    SELECT *,
+                           CASE WHEN is_resolved=1 THEN
+                               1.0/NULLIF(SUM(CASE WHEN is_resolved=1 THEN 1 ELSE 0 END)
+                                          OVER(PARTITION BY fund_id,seq),0)
+                           END equal_weight
+                    FROM eligible
                 ), period_returns AS (
                     SELECT fund_id,seq,MIN(entry_date) entry_date,MAX(exit_date) exit_date,
-                           AVG(CASE WHEN is_resolved=1 THEN total_return END) period_return,
+                           SUM(CASE WHEN is_resolved=1
+                                    THEN equal_weight*total_return END) period_return,
                            AVG(CAST(is_resolved AS FLOAT)) price_coverage
-                    FROM eligible GROUP BY fund_id,seq
+                    FROM eligible_weighted GROUP BY fund_id,seq
                 ), portfolio AS (
                     SELECT fund_id,COUNT(period_return) periods,MIN(entry_date) first_entry,
                            MAX(exit_date) last_exit,AVG(price_coverage) price_coverage,
@@ -925,7 +933,7 @@ def strategy_backtests(req: func.HttpRequest) -> func.HttpResponse:
             ),
             900,
         )
-        return _json_response({"strategy": strategy, "funds": rows})
+        return _json_response({"strategy": strategy, "weighting": "equal", "funds": rows})
     except Exception as e:
         logging.exception("Error loading strategy backtests")
         return _json_response({"error": str(e)}, 500)
