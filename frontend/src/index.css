@@ -376,6 +376,7 @@ tr:hover td {
 .fund-expand-button:hover { color:#fbbf24; }
 .fund-expand-button:focus-visible { outline:2px solid #fbbf24; outline-offset:3px; border-radius:4px; }
 .recent-trades { padding:1rem; background:#191e2b; border-left:3px solid #4f8cff; min-width:0; }
+.trade-valuation { margin-top:.2rem; color:var(--text-secondary); font-size:.75rem; font-weight:400; }
 .position-add { color:#052e1b; background:var(--green); }
 .position-reduce { color:#fff; background:#f97316; }
 .position-exit { color:#fff; background:var(--red); }

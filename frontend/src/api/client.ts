@@ -162,13 +162,13 @@ export interface AlphaAttribution {
 
 export interface StrategyTrade {
   ticker: string;
-  entry_date: string | null;
-  entry_price: number | string | null;
+  trade: "buy" | "sell";
+  trade_date: string;
+  entry_date: string;
   as_of_date: string | null;
   is_closed: boolean;
   pnl: number | null;
-  periods: number;
-  resolved: boolean;
+  pnl_type: "realized" | "mark_to_market";
 }
 
 export type QuarterlyChangeType = "new" | "add" | "reduce" | "exit";

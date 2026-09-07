@@ -950,33 +950,66 @@ def strategy_recent_trades(req: func.HttpRequest) -> func.HttpResponse:
     try:
         def load():
             rows = query_all("""
-                WITH filing_sequence AS (
-                    SELECT id,fund_id,next_filing_id,entry_date,
-                           ROW_NUMBER() OVER(ORDER BY entry_date,id) seq
-                    FROM trade_copy_results WHERE fund_id=:fund_id
-                ), next_values AS (
+                WITH original_filings AS (
+                    SELECT id,report_period,filing_date,
+                           ROW_NUMBER() OVER(PARTITION BY report_period ORDER BY filing_date,id) rn
+                    FROM filings WHERE fund_id=:fund_id AND form_type='13F-HR'
+                      AND filing_date<=CAST(SYSUTCDATETIME() AS date)
+                ), filing_sequence AS (
+                    SELECT id,filing_date,ROW_NUMBER() OVER(ORDER BY report_period,id) seq
+                    FROM original_filings WHERE rn=1
+                ), position_values AS (
                     SELECT fs.seq,UPPER(TRIM(h.ticker)) ticker,SUM(h.value_usd) position_value
-                    FROM filing_sequence fs JOIN holdings h ON h.filing_id=fs.next_filing_id
+                    FROM filing_sequence fs JOIN holdings h ON h.filing_id=fs.id
                     WHERE h.ticker IS NOT NULL AND TRIM(h.ticker)<>''
                       AND (h.put_call IS NULL OR h.put_call='')
                     GROUP BY fs.seq,UPPER(TRIM(h.ticker))
-                ), next_ranked AS (
+                ), ranked AS (
                     SELECT *,ROW_NUMBER() OVER(PARTITION BY seq ORDER BY position_value DESC,ticker) position_rank
-                    FROM next_values
+                    FROM position_values
+                ), eligible AS (
+                    SELECT * FROM ranked WHERE :strategy='new_to_exit' OR position_rank<=10
+                ), numbered AS (
+                    SELECT *,seq-ROW_NUMBER() OVER(PARTITION BY ticker ORDER BY seq) episode_group
+                    FROM eligible
+                ), episodes AS (
+                    SELECT ticker,MIN(seq) first_seq,MAX(seq) last_seq
+                    FROM numbered GROUP BY ticker,episode_group
                 )
-                SELECT p.ticker,p.entry_date,p.entry_price,p.exit_date,p.total_return,p.is_resolved,
-                       fs.seq,fs.entry_date period_entry_date,
-                       CASE WHEN EXISTS (
-                           SELECT 1 FROM next_ranked nr WHERE nr.seq=fs.seq AND nr.ticker=p.ticker
-                             AND (:strategy='new_to_exit' OR nr.position_rank<=10)
-                       ) THEN 1 ELSE 0 END next_is_eligible
-                FROM trade_copy_position_results p
-                JOIN filing_sequence fs ON fs.id=p.trade_copy_result_id
-                WHERE p.fund_id=:fund_id AND (:strategy='new_to_exit' OR p.position_rank<=10)
-                ORDER BY fs.seq,p.ticker
+                SELECT e.ticker,entry_day.price_date entry_date,buy_price.price entry_price,
+                       exit_day.price_date exit_date,sell_price.price exit_price,
+                       latest.price_date latest_price_date,latest.price latest_price
+                FROM episodes e
+                JOIN filing_sequence first_filing ON first_filing.seq=e.first_seq
+                LEFT JOIN filing_sequence exit_filing ON exit_filing.seq=e.last_seq+1
+                OUTER APPLY (
+                    SELECT TOP 1 price_date FROM daily_prices
+                    WHERE ticker='SPY' AND price_date>first_filing.filing_date
+                      AND price_date<=CAST(SYSUTCDATETIME() AS date)
+                    ORDER BY price_date
+                ) entry_day
+                OUTER APPLY (
+                    SELECT TOP 1 price_date FROM daily_prices
+                    WHERE ticker='SPY' AND price_date>exit_filing.filing_date
+                      AND price_date<=CAST(SYSUTCDATETIME() AS date)
+                    ORDER BY price_date
+                ) exit_day
+                OUTER APPLY (
+                    SELECT COALESCE(adj_close,close_price) price FROM daily_prices
+                    WHERE ticker=e.ticker AND price_date=entry_day.price_date
+                ) buy_price
+                OUTER APPLY (
+                    SELECT COALESCE(adj_close,close_price) price FROM daily_prices
+                    WHERE ticker=e.ticker AND price_date=exit_day.price_date
+                ) sell_price
+                OUTER APPLY (
+                    SELECT TOP 1 price_date,COALESCE(adj_close,close_price) price FROM daily_prices
+                    WHERE ticker=e.ticker AND price_date<=CAST(SYSUTCDATETIME() AS date)
+                    ORDER BY price_date DESC
+                ) latest
             """, {"fund_id": fund_id, "strategy": strategy})
             return recent_strategy_trades(rows)
-        trades = cached(f"strategy-trades:v1:{fund_id}:{strategy}", load, 900)
+        trades = cached(f"strategy-trades:v2:events:{fund_id}:{strategy}", load, 60)
         return _json_response({"fund_id": fund_id, "strategy": strategy, "trades": trades})
     except Exception as e:
         logging.exception("Error loading recent strategy trades")

@@ -1,6 +1,6 @@
 """Presentation calculations for persisted backtest results."""
 
-from math import isfinite, prod
+from math import isfinite
 
 
 def rank_alpha(rows):
@@ -25,40 +25,39 @@ def rank_alpha(rows):
 
 
 def recent_strategy_trades(rows):
-    """Join consecutive eligible filing periods, as in the strategy rankings."""
-    episodes = []
-    current = {}
-    for row in sorted(rows, key=lambda row: (row["seq"], row["ticker"])):
-        ticker = row["ticker"]
-        episode = current.get(ticker)
-        if episode is None or row["seq"] != episode[-1]["seq"] + 1:
-            episode = []
-            episodes.append(episode)
-            current[ticker] = episode
-        episode.append(row)
+    """Expand holding episodes into buy/sell events and rank by execution date.
 
+    All prices come from the same current adjusted-price series. A closed
+    episode's buy and sell events both show its final realized return.
+    """
     trades = []
-    for episode in episodes:
-        first, last = episode[0], episode[-1]
-        resolved = all(
-            row["is_resolved"] and row["total_return"] is not None
-            and isfinite(float(row["total_return"])) and float(row["total_return"]) >= -1
-            for row in episode
-        )
-        pnl = prod(1 + float(row["total_return"]) for row in episode) - 1 if resolved else None
-        if pnl is not None and not isfinite(pnl):
-            pnl = None
-        closed = not last["next_is_eligible"]
-        trades.append({
-            "ticker": first["ticker"],
-            "entry_date": first["entry_date"],
-            "entry_price": first["entry_price"],
-            "as_of_date": last["exit_date"],
+    for row in rows:
+        entry_date = row["entry_date"]
+        if entry_date is None:
+            # A filing signal without a subsequent trading session is not a trade.
+            continue
+        closed = row["exit_date"] is not None
+        valuation_date = row["exit_date"] if closed else row["latest_price_date"]
+        value = row["exit_price"] if closed else row["latest_price"]
+        entry_price = row["entry_price"]
+        pnl = None
+        if (entry_price is not None and value is not None and valuation_date is not None
+                and valuation_date >= entry_date):
+            entry_price, value = float(entry_price), float(value)
+            if isfinite(entry_price) and entry_price > 0 and isfinite(value) and value >= 0:
+                pnl = value / entry_price - 1
+                if not isfinite(pnl):
+                    pnl = None
+        common = {
+            "ticker": row["ticker"],
+            "entry_date": entry_date,
+            "as_of_date": valuation_date,
             "is_closed": closed,
             "pnl": pnl,
-            "periods": len(episode),
-            "resolved": resolved and pnl is not None,
-            "_sort_date": first["period_entry_date"],
-        })
-    trades.sort(key=lambda trade: (trade["_sort_date"], trade["ticker"]), reverse=True)
-    return [{key: value for key, value in trade.items() if key != "_sort_date"} for trade in trades[:5]]
+            "pnl_type": "realized" if closed else "mark_to_market",
+        }
+        trades.append({**common, "trade": "buy", "trade_date": entry_date})
+        if closed:
+            trades.append({**common, "trade": "sell", "trade_date": row["exit_date"]})
+    trades.sort(key=lambda trade: (trade["trade_date"], trade["ticker"], trade["trade"]), reverse=True)
+    return trades[:5]
