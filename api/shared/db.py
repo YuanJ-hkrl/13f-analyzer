@@ -4,6 +4,8 @@ import logging
 import os
 import re
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from threading import Lock
 from typing import Any, Callable, Optional, TypeVar
 
@@ -16,6 +18,31 @@ _engine_lock = Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 _cache_lock = Lock()
 _T = TypeVar("_T")
+_read_timings: ContextVar[Optional[dict[str, float]]] = ContextVar("read_timings", default=None)
+
+
+@contextmanager
+def capture_read_timings():
+    """Collect DB client timings for this context only, without recording SQL."""
+    timings: dict[str, float] = {}
+    token = _read_timings.set(timings)
+    try:
+        yield timings
+    finally:
+        _read_timings.reset(token)
+
+
+@contextmanager
+def _time_read_phase(name: str):
+    timings = _read_timings.get()
+    if timings is None:
+        yield
+        return
+    started = time.perf_counter()
+    try:
+        yield
+    finally:
+        timings[name] = timings.get(name, 0.0) + (time.perf_counter() - started) * 1000
 
 
 def _is_transient_error(error: DBAPIError) -> bool:
@@ -66,10 +93,18 @@ def _run_read(operation: Callable[[Any], _T]) -> _T:
     """Run a read query, reconnecting after transient Azure SQL connection failures."""
     attempts = _positive_int_env("DB_CONNECT_ATTEMPTS", 3)
     for attempt in range(1, attempts + 1):
-        engine = get_engine()
+        with _time_read_phase("engine"):
+            engine = get_engine()
         try:
-            with engine.connect() as conn:
-                return operation(conn)
+            with _time_read_phase("connect"):
+                connection = engine.connect()
+            try:
+                with _time_read_phase("read"):
+                    result = operation(connection)
+            finally:
+                with _time_read_phase("close"):
+                    connection.close()
+            return result
         except DBAPIError as error:
             if not _is_transient_error(error):
                 raise
@@ -84,7 +119,8 @@ def _run_read(operation: Callable[[Any], _T]) -> _T:
                 delay,
                 exc_info=True,
             )
-            time.sleep(delay)
+            with _time_read_phase("retry"):
+                time.sleep(delay)
     raise RuntimeError("Database retry loop ended unexpectedly")
 
 

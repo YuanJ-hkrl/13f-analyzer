@@ -25,6 +25,38 @@ class DatabaseResilienceTests(unittest.TestCase):
         env.start()
         self.addCleanup(env.stop)
 
+    @patch.object(db, "get_engine")
+    def test_timings_separate_connection_read_and_close(self, get_engine):
+        connection = get_engine.return_value.connect.return_value
+        with db.capture_read_timings() as timings:
+            with patch.object(db.time, "perf_counter", side_effect=[0, .1, 1, 1.2, 2, 2.5, 3, 3.3]):
+                self.assertEqual(db._run_read(lambda conn: "result"), "result")
+        for phase, expected in {"engine": 100, "connect": 200, "read": 500, "close": 300}.items():
+            self.assertAlmostEqual(timings[phase], expected)
+        connection.close.assert_called_once()
+        self.assertIsNone(db._read_timings.get())
+
+    @patch.object(db, "get_engine")
+    def test_failed_read_closes_connection_and_restores_timing_context(self, get_engine):
+        connection = get_engine.return_value.connect.return_value
+        with self.assertRaises(ValueError):
+            with db.capture_read_timings() as timings:
+                db._run_read(MagicMock(side_effect=ValueError("invalid result")))
+        self.assertIn("read", timings)
+        self.assertIn("close", timings)
+        connection.close.assert_called_once()
+        self.assertIsNone(db._read_timings.get())
+
+    def test_nested_timing_contexts_are_isolated(self):
+        with db.capture_read_timings() as outer:
+            with db.capture_read_timings() as inner:
+                with db._time_read_phase("read"):
+                    pass
+            self.assertIs(db._read_timings.get(), outer)
+            self.assertEqual(outer, {})
+            self.assertIn("read", inner)
+        self.assertIsNone(db._read_timings.get())
+
     @patch.object(db.time, "sleep")
     @patch.object(db, "_discard_engine")
     @patch.object(db, "get_engine")
@@ -37,7 +69,8 @@ class DatabaseResilienceTests(unittest.TestCase):
         operation = MagicMock(return_value=[{"ok": 1}])
         self.assertEqual(db._run_read(operation), [{"ok": 1}])
         self.assertEqual(engine.connect.call_count, 2)
-        operation.assert_called_once_with(connected.__enter__.return_value)
+        operation.assert_called_once_with(connected)
+        connected.close.assert_called_once()
         discard.assert_called_once_with(engine)
         sleep.assert_called_once_with(5)
 

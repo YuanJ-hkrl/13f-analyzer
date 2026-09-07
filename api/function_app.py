@@ -3,7 +3,7 @@ import json
 import logging
 import time
 
-from shared.db import cached, query_all, query_one
+from shared.db import cached, capture_read_timings, query_all, query_one
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -1405,10 +1405,12 @@ def dashboard(req: func.HttpRequest) -> func.HttpResponse:
 
     def measure(name, operation):
         stage_started = time.perf_counter()
-        try:
-            return operation()
-        finally:
-            timings[name] = (time.perf_counter() - stage_started) * 1000
+        with capture_read_timings() as db_timings:
+            try:
+                return operation()
+            finally:
+                timings[name] = (time.perf_counter() - stage_started) * 1000
+                timings.update({f"{name}_{phase}": duration for phase, duration in db_timings.items()})
 
     try:
         def load_dashboard():
