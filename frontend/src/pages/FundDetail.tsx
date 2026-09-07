@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, Tooltip, Treemap, XAxis, YAxis,
 } from "recharts";
 import { api, type BacktestResult, type Fund, type Holding, type TradeCopyResult } from "../api/client";
+import AlphaAttribution from "../components/AlphaAttribution";
 
 const numeric = (value: number | string | null | undefined) => value == null ? null : Number(value);
 const percent = (value: number | string | null | undefined) => {
@@ -161,6 +162,8 @@ export default function FundDetail() {
         <Bar dataKey="alpha" name="Alpha">{alphaData.map((row, index) => <Cell key={index} fill={row.alpha >= 0 ? "#34d399" : "#ef4444"}/>)}</Bar>
       </BarChart></ResponsiveContainer></div>
     </section>
+
+    <AlphaAttribution fundId={fundId}/>
 
     {treeData.length > 0 && <section className="card"><h2>Latest 13F Portfolio Changes</h2>
       <p className="chart-note">All positions present in the latest filing; area represents disclosed market value.</p>

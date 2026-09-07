@@ -7,7 +7,7 @@ const pct=(v:number|string|null)=>v==null?"—":`${Number(v)>=0?"+":""}${(Number
 const count=(v:number|string)=>Math.abs(Number(v)).toLocaleString();
 function Activity({title,rows}:{title:string;rows:SecurityActivity[]}){const nav=useNavigate();return <section className="attribution-panel"><h3>{title}</h3><table><thead><tr><th>Fund</th><th>Action</th><th className="text-right">Δ Shares</th><th className="text-right">Value</th></tr></thead><tbody>{rows.map(r=><tr className="clickable-row" key={r.fund_id} onClick={()=>nav(`/funds/${r.fund_id}`)}><td>{r.name}</td><td><span className={`change-pill change-${r.action==='add'?'added':r.action}`}>{r.action}</span></td><td className={`text-right ${Number(r.shares)-Number(r.previous_shares)>=0?'positive':'negative'}`}>{count(Number(r.shares)-Number(r.previous_shares))}</td><td className="text-right">{money(r.action==='exit'?r.previous_value:r.value_usd)}</td></tr>)}</tbody></table></section>}
 const positionMarkers:Record<SecurityPositionAction,{icon:string;label:string}>={
- new:{icon:"◆",label:"New position"},add:{icon:"▲",label:"Added"},reduce:{icon:"▼",label:"Reduced"},exit:{icon:"×",label:"Exited"},unchanged:{icon:"—",label:"Unchanged"}
+ new:{icon:"★",label:"New position"},add:{icon:"▲",label:"Added"},reduce:{icon:"▼",label:"Reduced"},exit:{icon:"×",label:"Exited"},unchanged:{icon:"—",label:"Unchanged"}
 };
 function PositionChanges({quarters,rows}:{quarters:string[];rows:SecurityPositionChange[]}){
  const funds=[...new Map(rows.map(row=>[row.fund_id,{fund_id:row.fund_id,name:row.name,fund_type:row.fund_type}])).values()];

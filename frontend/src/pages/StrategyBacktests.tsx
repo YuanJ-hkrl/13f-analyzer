@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { api, type StrategyBacktestFund } from "../api/client";
+import RecentStrategyTrades from "../components/RecentStrategyTrades";
 
 type Strategy = "top10" | "new_to_exit";
 type SortKey = "annualized_return" | "cumulative_return" | "win_rate" | "average_trade_return";
@@ -16,12 +17,14 @@ export default function StrategyBacktests() {
   const [sortKey,setSortKey] = useState<SortKey>("annualized_return");
   const [loading,setLoading] = useState(true);
   const [error,setError] = useState<string|null>(null);
-  useEffect(()=>{ setLoading(true); setError(null); api.strategyBacktests(strategy)
-    .then((data)=>setRows(data.funds)).catch((err)=>setError(err.message)).finally(()=>setLoading(false)); },[strategy]);
+  const [expandedFund,setExpandedFund] = useState<number|null>(null);
+  useEffect(()=>{ let active=true; setLoading(true); setError(null); api.strategyBacktests(strategy)
+    .then((data)=>{if(active)setRows(data.funds);}).catch((err)=>{if(active)setError(err.message);})
+    .finally(()=>{if(active)setLoading(false);}); return ()=>{active=false;}; },[strategy]);
   const sorted=useMemo(()=>[...rows].sort((a,b)=>numeric(b[sortKey])-numeric(a[sortKey])),[rows,sortKey]);
 
   return <><div className="page-header"><h1>Strategy Backtests</h1><p>Compare rules-based 13F copy strategies using the first market close after filing publication.</p></div>
-    <div className="filter-bar"><label>Strategy{" "}<select className="period-select" value={strategy} onChange={(e)=>setStrategy(e.target.value as Strategy)}>
+    <div className="filter-bar"><label>Strategy{" "}<select className="period-select" value={strategy} onChange={(e)=>{setExpandedFund(null);setStrategy(e.target.value as Strategy);}}>
       <option value="top10">Top 10 trades</option><option value="new_to_exit">New trades to exit</option></select></label>
       <label>Rank by{" "}<select className="period-select" value={sortKey} onChange={(e)=>setSortKey(e.target.value as SortKey)}>
         <option value="annualized_return">Annualized return</option><option value="cumulative_return">Cumulative return</option>
@@ -32,11 +35,15 @@ export default function StrategyBacktests() {
       <th>#</th><th>Fund</th><th>Group</th><th className="text-right">Ann. return</th><th className="text-right">Cumulative</th>
       <th className="text-right">Winning trades</th><th className="text-right">Win rate</th><th className="text-right">Avg. trade</th>
       <th className="text-right">Coverage</th><th className="text-right">Periods</th></tr></thead>
-      <tbody>{sorted.map((row,index)=><tr key={row.fund_id}><td>{index+1}</td><td><strong>{row.name}</strong></td>
+      <tbody>{sorted.map((row,index)=><Fragment key={row.fund_id}><tr><td>{index+1}</td><td><button type="button" className="fund-expand-button" aria-expanded={expandedFund===row.fund_id} aria-controls={`fund-trades-${row.fund_id}`} onClick={()=>setExpandedFund(expandedFund===row.fund_id?null:row.fund_id)}>
+        <span aria-hidden="true">{expandedFund===row.fund_id?"▾":"▸"}</span> <strong>{row.name}</strong></button></td>
         <td><span className={`badge ${row.fund_type==="Long Only"?"badge-long":"badge-hedge"}`}>{row.fund_type}</span></td>
         <td className={`text-right ${numeric(row.annualized_return)>=0?"positive":"negative"}`}>{percent(row.annualized_return)}</td>
         <td className={`text-right ${numeric(row.cumulative_return)>=0?"positive":"negative"}`}>{percent(row.cumulative_return)}</td>
         <td className="text-right">{row.winning_trades}/{row.resolved_trades}</td><td className="text-right">{percent(row.win_rate)}</td>
         <td className="text-right">{percent(row.average_trade_return)}</td><td className="text-right">{percent(row.price_coverage)}</td>
-        <td className="text-right">{row.periods}</td></tr>)}</tbody></table></div>}</>;
+        <td className="text-right">{row.periods}</td></tr>
+        {expandedFund===row.fund_id && <tr id={`fund-trades-${row.fund_id}`}><td colSpan={10}>
+          <RecentStrategyTrades key={`${strategy}:${row.fund_id}`} fundId={row.fund_id} strategy={strategy}/>
+        </td></tr>}</Fragment>)}</tbody></table></div>}</>;
 }

@@ -151,6 +151,26 @@ export interface StrategyBacktestFund {
   price_coverage:number|string; first_entry:string; last_exit:string;
 }
 
+export interface AlphaAttribution {
+  ticker: string;
+  annualized_alpha: number;
+  excess_contribution: number | string;
+  periods: number;
+  history_start: string;
+  history_end: string;
+}
+
+export interface StrategyTrade {
+  ticker: string;
+  entry_date: string | null;
+  entry_price: number | string | null;
+  as_of_date: string | null;
+  is_closed: boolean;
+  pnl: number | null;
+  periods: number;
+  resolved: boolean;
+}
+
 export type QuarterlyChangeType = "new" | "add" | "reduce" | "exit";
 
 export interface QuarterlyChange {
@@ -208,6 +228,8 @@ async function fetchApi<T>(path: string): Promise<T> {
 }
 
 export const api = {
+  fundAlpha: (id: number) => fetchApi<{ contributors: AlphaAttribution[]; detractors: AlphaAttribution[] }>(`/funds/${id}/alpha-attribution`),
+  strategyTrades: (id: number, strategy: "top10" | "new_to_exit") => fetchApi<{ trades: StrategyTrade[] }>(`/strategy-backtests/${id}/trades?strategy=${strategy}`),
   health: () => fetchApi<{ status: string }>("/health"),
   securities: (query = "") => fetchApi<{ securities: SecuritySearchResult[] }>(`/securities?q=${encodeURIComponent(query)}`),
   security: (ticker: string) => fetchApi<SecurityDetailData>(`/securities/${encodeURIComponent(ticker)}`),

@@ -371,7 +371,11 @@ tr:hover td {
 .position-change-table td:first-child { min-width:190px; }
 .position-change-table td:first-child small { display:block; margin-top:0.2rem; color:var(--text-secondary); font-size:0.7rem; }
 .position-marker { display:inline-flex; align-items:center; justify-content:center; width:1.65rem; height:1.65rem; font-style:normal; font-size:1rem; font-weight:800; border-radius:50%; }
-.position-new { color:#e2e8f0; background:#334155; }
+.position-new { color:#fbbf24; background:#493813; border:1px solid #d99b20; font-size:1.3rem; text-shadow:0 0 6px #fbbf2444; }
+.fund-expand-button { display:inline-flex; align-items:center; gap:.5rem; border:0; background:transparent; color:var(--text-primary, #e2e8f0); font:inherit; padding:.4rem .2rem; cursor:pointer; text-align:left; }
+.fund-expand-button:hover { color:#fbbf24; }
+.fund-expand-button:focus-visible { outline:2px solid #fbbf24; outline-offset:3px; border-radius:4px; }
+.recent-trades { padding:1rem; background:#191e2b; border-left:3px solid #4f8cff; min-width:0; }
 .position-add { color:#052e1b; background:var(--green); }
 .position-reduce { color:#fff; background:#f97316; }
 .position-exit { color:#fff; background:var(--red); }

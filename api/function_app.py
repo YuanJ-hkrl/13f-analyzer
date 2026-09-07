@@ -4,6 +4,7 @@ import logging
 import time
 
 from shared.db import cached, capture_read_timings, query_all, query_one
+from shared.analytics import rank_alpha, recent_strategy_trades
 
 app = func.FunctionApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
@@ -937,6 +938,72 @@ def strategy_backtests(req: func.HttpRequest) -> func.HttpResponse:
         return _json_response({"strategy": strategy, "weighting": "equal", "funds": rows})
     except Exception as e:
         logging.exception("Error loading strategy backtests")
+        return _json_response({"error": str(e)}, 500)
+
+
+@app.route(route="strategy-backtests/{fund_id:int}/trades")
+def strategy_recent_trades(req: func.HttpRequest) -> func.HttpResponse:
+    fund_id = int(req.route_params["fund_id"])
+    strategy = req.params.get("strategy", "top10")
+    if strategy not in ("top10", "new_to_exit"):
+        return _json_response({"error": "invalid strategy"}, 400)
+    try:
+        def load():
+            rows = query_all("""
+                WITH filing_sequence AS (
+                    SELECT id,fund_id,next_filing_id,entry_date,
+                           ROW_NUMBER() OVER(ORDER BY entry_date,id) seq
+                    FROM trade_copy_results WHERE fund_id=:fund_id
+                ), next_values AS (
+                    SELECT fs.seq,UPPER(TRIM(h.ticker)) ticker,SUM(h.value_usd) position_value
+                    FROM filing_sequence fs JOIN holdings h ON h.filing_id=fs.next_filing_id
+                    WHERE h.ticker IS NOT NULL AND TRIM(h.ticker)<>''
+                      AND (h.put_call IS NULL OR h.put_call='')
+                    GROUP BY fs.seq,UPPER(TRIM(h.ticker))
+                ), next_ranked AS (
+                    SELECT *,ROW_NUMBER() OVER(PARTITION BY seq ORDER BY position_value DESC,ticker) position_rank
+                    FROM next_values
+                )
+                SELECT p.ticker,p.entry_date,p.entry_price,p.exit_date,p.total_return,p.is_resolved,
+                       fs.seq,fs.entry_date period_entry_date,
+                       CASE WHEN EXISTS (
+                           SELECT 1 FROM next_ranked nr WHERE nr.seq=fs.seq AND nr.ticker=p.ticker
+                             AND (:strategy='new_to_exit' OR nr.position_rank<=10)
+                       ) THEN 1 ELSE 0 END next_is_eligible
+                FROM trade_copy_position_results p
+                JOIN filing_sequence fs ON fs.id=p.trade_copy_result_id
+                WHERE p.fund_id=:fund_id AND (:strategy='new_to_exit' OR p.position_rank<=10)
+                ORDER BY fs.seq,p.ticker
+            """, {"fund_id": fund_id, "strategy": strategy})
+            return recent_strategy_trades(rows)
+        trades = cached(f"strategy-trades:v1:{fund_id}:{strategy}", load, 900)
+        return _json_response({"fund_id": fund_id, "strategy": strategy, "trades": trades})
+    except Exception as e:
+        logging.exception("Error loading recent strategy trades")
+        return _json_response({"error": str(e)}, 500)
+
+
+@app.route(route="funds/{fund_id:int}/alpha-attribution")
+def fund_alpha_attribution(req: func.HttpRequest) -> func.HttpResponse:
+    fund_id = int(req.route_params["fund_id"])
+    try:
+        def load():
+            rows = query_all("""
+                WITH history AS (
+                    SELECT MIN(entry_date) history_start,MAX(exit_date) history_end
+                    FROM trade_copy_results WHERE fund_id=:fund_id
+                )
+                SELECT p.ticker,SUM(p.target_weight*p.excess_return) excess_contribution,
+                       COUNT(*) periods,h.history_start,h.history_end,
+                       DATEDIFF(day,h.history_start,h.history_end) history_days
+                FROM trade_copy_position_results p CROSS JOIN history h
+                WHERE p.fund_id=:fund_id AND p.is_resolved=1 AND p.excess_return IS NOT NULL
+                GROUP BY p.ticker,h.history_start,h.history_end
+            """, {"fund_id": fund_id})
+            return rank_alpha(rows)
+        return _json_response(cached(f"fund-alpha:v1:{fund_id}", load, 900))
+    except Exception as e:
+        logging.exception("Error loading fund alpha attribution")
         return _json_response({"error": str(e)}, 500)
 
 

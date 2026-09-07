@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import AlphaAttribution from "../components/AlphaAttribution";
 import {
   Area, Bar, BarChart, CartesianGrid, Cell, ComposedChart, Legend, Line, LineChart,
   ResponsiveContainer, Tooltip, XAxis, YAxis,
@@ -115,6 +116,8 @@ export default function TradeCopyFundDetail() {
       <Tooltip contentStyle={{ background: "#222633", border: "1px solid #2e3344" }} formatter={(v) => [`${Number(v).toFixed(1)}%`, "Alpha"]}/>
       <Bar dataKey="alpha">{chartData.map((row, index) => <Cell key={index} fill={row.alpha >= 0 ? "#10b981" : "#ef4444"}/>)}</Bar>
     </BarChart></ResponsiveContainer></div></section>
+
+    <AlphaAttribution fundId={fundId}/>
 
     <section className="card"><h2>Return Attribution</h2><p className="chart-note">Position weights × subsequent returns, summed across all simulated periods.</p>
       <div className="attribution-grid"><AttributionTable title="Top 10 Contributors" rows={contributors}/><AttributionTable title="Top 10 Detractors" rows={detractors}/></div>
