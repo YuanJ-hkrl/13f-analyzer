@@ -2,19 +2,30 @@
 
 import logging
 import os
+import re
 import time
 from threading import Lock
 from typing import Any, Callable, Optional, TypeVar
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import DBAPIError, OperationalError
 
 _engine: Optional[Engine] = None
 _engine_lock = Lock()
 _cache: dict[str, tuple[float, Any]] = {}
 _cache_lock = Lock()
 _T = TypeVar("_T")
+
+
+def _is_transient_error(error: DBAPIError) -> bool:
+    """ODBC can report Azure unavailability as generic HY000/DBAPIError."""
+    if isinstance(error, OperationalError) or error.connection_invalidated:
+        return True
+    # Match native ODBC codes, not arbitrary numbers in SQL or parameters.
+    return bool(re.search(
+        r"\((?:40197|40501|40613|49918|49919|49920)\)", str(error.orig)
+    ))
 
 
 def _positive_int_env(name: str, default: int) -> int:
@@ -59,11 +70,13 @@ def _run_read(operation: Callable[[Any], _T]) -> _T:
         try:
             with engine.connect() as conn:
                 return operation(conn)
-        except OperationalError:
+        except DBAPIError as error:
+            if not _is_transient_error(error):
+                raise
             _discard_engine(engine)
             if attempt == attempts:
                 raise
-            delay = min(2 ** (attempt - 1), 4)
+            delay = min(5 * 2 ** min(attempt - 1, 3), 30)
             logging.warning(
                 "Azure SQL connection/query attempt %d/%d failed; retrying in %ds",
                 attempt,
@@ -100,7 +113,9 @@ def cached(key: str, loader, ttl_seconds: int = 300):
             return hit[1]
     try:
         value = loader()
-    except OperationalError:
+    except DBAPIError as error:
+        if not _is_transient_error(error):
+            raise
         if hit:
             logging.exception("Returning stale cached value after DB failure for %s", key)
             return hit[1]

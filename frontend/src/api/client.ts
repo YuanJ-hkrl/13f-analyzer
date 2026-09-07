@@ -166,14 +166,45 @@ export interface QuarterlyChange {
 }
 
 const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+const RESPONSE_TTL_MS = 60_000;
+const MAX_CACHED_RESPONSES = 50;
+const responses = new Map<string, { expiresAt: number; data: unknown }>();
+const pendingRequests = new Map<string, Promise<unknown>>();
 
 async function fetchApi<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error || `API error ${res.status}`);
+  // These endpoints are read-only. Keep health checks live and never cache errors.
+  const cacheable = path !== "/health";
+  if (cacheable) {
+    const hit = responses.get(path);
+    if (hit && hit.expiresAt > Date.now()) return hit.data as T;
+    responses.delete(path);
+    const pending = pendingRequests.get(path);
+    if (pending) return pending as Promise<T>;
   }
-  return res.json();
+
+  const request = (async (): Promise<T> => {
+    const res = await fetch(`${API_BASE}${path}`);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `API error ${res.status}`);
+    }
+    const data: T = await res.json();
+    if (cacheable) {
+      if (responses.size >= MAX_CACHED_RESPONSES) {
+        const oldest = responses.keys().next().value;
+        if (oldest !== undefined) responses.delete(oldest);
+      }
+      responses.set(path, { expiresAt: Date.now() + RESPONSE_TTL_MS, data });
+    }
+    return data;
+  })();
+
+  if (cacheable) pendingRequests.set(path, request);
+  try {
+    return await request;
+  } finally {
+    if (cacheable) pendingRequests.delete(path);
+  }
 }
 
 export const api = {

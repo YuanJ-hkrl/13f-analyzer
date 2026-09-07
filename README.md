@@ -191,6 +191,33 @@ schedule:
   - cron: '0 6 16 2,5,8,11 *'  # 16th of filing months
 ```
 
+## Azure SQL error 40613
+
+Error 40613 means the database is temporarily unavailable. Azure maintenance,
+failover, or a serverless database resuming from auto-pause can cause it. Check
+the database's Azure Resource Health and pause/resume events to identify the cause.
+If failures consistently follow idle periods, check whether auto-pause is enabled;
+disabling it avoids pause-related cold starts but increases idle compute costs.
+
+The API retries transient read failures, including generic ODBC `HY000` errors
+with native code `40613`. Defaults are three total attempts with 5- and 10-second
+waits. Set `DB_CONNECT_ATTEMPTS` in API application settings to adjust the attempt
+count; subsequent waits cap at 30 seconds. Each connection also has a separate
+`DB_LOGIN_TIMEOUT_SECONDS` (default 20), so account for the hosting/request timeout
+before increasing attempts. `pool_pre_ping` alone cannot make an unavailable
+database connect successfully.
+
+Where a cached loader propagates a transient database exception, an existing
+expired in-memory result can be returned. Cold API instances have no such cache,
+and persistent failures still propagate after retries. These retries apply to
+API reads, not pipeline write transactions.
+
+Run the database regression tests without connecting to Azure:
+
+```bash
+python -m unittest discover -s api/tests -v
+```
+
 ## Next Steps
 
 - [ ] Verify CIK mappings for all 32 funds

@@ -1,6 +1,7 @@
 import azure.functions as func
 import json
 import logging
+import time
 
 from shared.db import cached, query_all, query_one
 
@@ -1397,16 +1398,35 @@ def _dashboard_consensus_persisted(latest_quarter):
 
 @app.route(route="dashboard")
 def dashboard(req: func.HttpRequest) -> func.HttpResponse:
+    started = time.perf_counter()
+    timings = {}
+    load_started = False
+    load_completed = False
+
+    def measure(name, operation):
+        stage_started = time.perf_counter()
+        try:
+            return operation()
+        finally:
+            timings[name] = (time.perf_counter() - stage_started) * 1000
+
     try:
         def load_dashboard():
-            recent_quarters = _dashboard_recent_quarters()
-            funds = _dashboard_funds()
-            latest_row = query_one("SELECT MAX(report_period) AS quarter FROM filings")
+            nonlocal load_started, load_completed
+            load_started = True
+            recent_quarters = measure("recent_quarters", _dashboard_recent_quarters)
+            funds = measure("funds", _dashboard_funds)
+            latest_row = measure("latest_quarter", lambda: query_one(
+                "SELECT MAX(report_period) AS quarter FROM filings"
+            ))
             latest_quarter = latest_row["quarter"] if latest_row else None
-            consensus = _dashboard_consensus_persisted(latest_quarter) if latest_quarter else []
+            consensus = measure("consensus", lambda: _dashboard_consensus_persisted(
+                latest_quarter
+            )) if latest_quarter else []
             grouped = {"buys": [], "sells": []}
             for row in consensus:
                 grouped["buys" if row["side"] == "buy" else "sells"].append(row)
+            load_completed = True
             return {
                 "recent_quarters": recent_quarters,
                 "latest_quarter": latest_quarter,
@@ -1414,7 +1434,20 @@ def dashboard(req: func.HttpRequest) -> func.HttpResponse:
                 "funds": funds,
             }
 
-        return _json_response(cached("dashboard", load_dashboard, 300))
+        response = _json_response(cached("dashboard", load_dashboard, 300))
+        cache_status = "miss" if load_completed else "stale" if load_started else "hit"
     except Exception as e:
         logging.exception("Error getting dashboard")
-        return _json_response({"error": str(e)}, 500)
+        response = _json_response({"error": str(e)}, 500)
+        response.headers["Cache-Control"] = "no-store"
+        cache_status = "error"
+
+    # Handler time includes cache access, DB retries and JSON serialization, but
+    # excludes platform startup/queueing and browser-to-API network latency.
+    timings["app"] = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = ", ".join(
+        [f'{name};dur={duration:.1f}' for name, duration in timings.items()]
+        + [f'cache;desc="{cache_status}"']
+    )
+    logging.info("dashboard timing cache=%s durations_ms=%s", cache_status, timings)
+    return response
